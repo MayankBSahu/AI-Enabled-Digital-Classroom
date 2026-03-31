@@ -1,3 +1,9 @@
-# Root Python dependencies entrypoint
-# Installs the AI microservice requirements.
--r microservices/ai-service/requirements.txt
+# Root Python dependencies for AI Digital Classroom
+# These cover the FastAPI AI microservice and vector retrieval stack.
+fastapi==0.115.12
+uvicorn[standard]==0.34.0
+pydantic==2.10.6
+chromadb==0.6.3
+openai==1.73.0
+python-dotenv==1.0.1
+numpy==2.2.4
