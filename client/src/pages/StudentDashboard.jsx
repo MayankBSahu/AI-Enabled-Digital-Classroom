@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/Toast";
 import Sidebar from "../components/Sidebar";
@@ -8,8 +8,17 @@ export default function StudentDashboard() {
   const { user } = useAuth();
   const { addToast } = useToast();
 
-  const [activeTab, setActiveTab] = useState("submit");
-  const [courseId, setCourseId] = useState("CSE101");
+  const [activeTab, setActiveTab] = useState("courses");
+  const [courseId, setCourseId] = useState("");
+  const [selectedCourse, setSelectedCourse] = useState(null);
+  const [myCourses, setMyCourses] = useState([]);
+  const [enrolledStudents, setEnrolledStudents] = useState([]);
+  const [courseProfessor, setCourseProfessor] = useState(null);
+  
+  const [showEnrollModal, setShowEnrollModal] = useState(false);
+  const [enrollmentCode, setEnrollmentCode] = useState("");
+  const [enrolling, setEnrolling] = useState(false);
+
   const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api";
   const apiOrigin = apiBase.replace(/\/api\/?$/, "");
 
@@ -36,8 +45,54 @@ export default function StudentDashboard() {
   const [materials, setMaterials] = useState([]);
 
   /* ── Loading ── */
+  /* ── Loading ── */
   const [submitting, setSubmitting] = useState(false);
   const [aiThinking, setAiThinking] = useState(false);
+
+  const loadMyCourses = async () => {
+    try {
+      const { data } = await api.get('/courses/student');
+      setMyCourses(data.courses || []);
+    } catch (error) {
+      console.error("Failed to load enrolled courses");
+    }
+  };
+
+  useEffect(() => {
+    loadMyCourses();
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "people" && courseId) {
+      loadStudents();
+    }
+  }, [activeTab, courseId]);
+
+  const loadStudents = async () => {
+    try {
+      const { data } = await api.get(`/courses/${courseId}/students`);
+      setEnrolledStudents(data.students || []);
+      setCourseProfessor(data.professor || null);
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to load students", "error");
+    }
+  };
+
+  const handleEnroll = async (e) => {
+    e.preventDefault();
+    setEnrolling(true);
+    try {
+      await api.post('/courses/enroll', { enrollmentCode });
+      addToast("Successfully enrolled!", "success");
+      setShowEnrollModal(false);
+      setEnrollmentCode("");
+      loadMyCourses();
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to enroll", "error");
+    } finally {
+      setEnrolling(false);
+    }
+  };
 
   const loadAssignments = async () => {
     try {
@@ -144,6 +199,7 @@ export default function StudentDashboard() {
           activeTab={activeTab}
           onTabChange={setActiveTab}
           role="student"
+          hasCourseSelected={!!selectedCourse}
         />
 
         <main className="app-content">
@@ -154,25 +210,122 @@ export default function StudentDashboard() {
           </div>
 
           {/* Course Selector */}
-          <div className="course-bar">
-            <label htmlFor="stu-course-id">📚 Course</label>
-            <input
-              id="stu-course-id"
-              value={courseId}
-              onChange={(e) => setCourseId(e.target.value)}
-              placeholder="e.g. CSE101"
-              style={{ maxWidth: 200 }}
-            />
-            <button className="btn-secondary btn-sm" onClick={loadAssignments}>
-              Load Assignments
-            </button>
-            <button className="btn-secondary btn-sm" onClick={loadMaterials}>
-              Load Materials
-            </button>
-          </div>
+          {selectedCourse && activeTab !== "courses" ? (
+            <div className="course-bar">
+              <div className="selected-course-indicator">
+                <span className="selected-course-icon" style={{ background: selectedCourse.color || "var(--primary)" }}>{selectedCourse.icon || "📚"}</span>
+                <div className="selected-course-info">
+                  <span className="selected-course-name">{selectedCourse.name}</span>
+                  <span className="selected-course-id">{selectedCourse.courseId} • {selectedCourse.professor?.name || "Professor"}</span>
+                </div>
+              </div>
+              <button className="btn-secondary btn-sm" onClick={loadAssignments}>
+                Load Assignments
+              </button>
+              <button className="btn-secondary btn-sm" onClick={loadMaterials}>
+                Load Materials
+              </button>
+              <button className="btn-ghost btn-sm" onClick={() => { setSelectedCourse(null); setCourseId(""); setActiveTab("courses"); }} style={{ marginLeft: 'auto' }}>
+                ↩ Change Course
+              </button>
+            </div>
+          ) : (
+            activeTab === "courses" && (
+              <div>
+                <div className="course-grid-header">
+                  <div className="section-icon indigo">📚</div>
+                  <div>
+                    <h2>My Courses</h2>
+                    <p>Select a course to view assignments, materials, and track progress</p>
+                  </div>
+                </div>
+                <div className="course-grid mb-8">
+                  {myCourses.length === 0 ? (
+                    <div className="glass-card-static" style={{ gridColumn: "1 / -1", textAlign: "center", padding: "var(--space-8)" }}>
+                      <div className="section-icon mx-auto mb-4" style={{ filter: "grayscale(1)", opacity: 0.5 }}>📭</div>
+                      <p className="empty-state-text text-lg">You are not enrolled in any courses yet.</p>
+                      <p className="text-secondary">Click the + button below to join a class using an enrollment code.</p>
+                    </div>
+                  ) : (
+                    myCourses.map((c) => (
+                      <div
+                        key={c._id}
+                        className="course-card"
+                        onClick={() => { setSelectedCourse(c); setCourseId(c.courseId); setActiveTab("submit"); }}
+                        style={{ '--course-color': c.color || "var(--primary)" }}
+                      >
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="course-card-icon" style={{ background: c.color || "var(--primary)", margin: 0 }}>
+                            {c.icon || "📚"}
+                          </div>
+                          <div className="badge badge-primary">
+                            {c.courseId}
+                          </div>
+                        </div>
+                        <div className="course-card-content">
+                          <h3 className="course-card-title">{c.name}</h3>
+                          <p className="course-card-id">{c.professor?.name || "Professor"}</p>
+                        </div>
+                        <div className="course-card-footer">
+                          <span className="course-card-students">View Dashboard →</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )
+          )}
 
           {/* Tab Content */}
           <div className="tab-content" key={activeTab}>
+
+            {/* ── People Tab ── */}
+            {activeTab === "people" && (
+              <div>
+                <div className="section-header">
+                  <div className="section-icon indigo">👥</div>
+                  <div>
+                    <h2>Classroom Roster</h2>
+                    <p>View the professor and all students enrolled in this course</p>
+                  </div>
+                </div>
+                <div className="glass-card mb-8">
+                  <h3 className="text-lg mb-4" style={{ fontWeight: 600, borderBottom: "1px solid var(--border)", paddingBottom: "var(--space-2)" }}>Professor</h3>
+                  <div className="flex items-center mb-6" style={{ gap: "var(--space-4)" }}>
+                    <div className="sidebar-avatar" style={{ margin: 0, width: 44, height: 44, background: "var(--primary-glow)", color: "var(--primary-light)", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "var(--radius-md)", fontWeight: "bold" }}>
+                      {courseProfessor?.name?.[0]?.toUpperCase() || "P"}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>{courseProfessor?.name || "Professor"}</div>
+                      <div className="text-sm text-secondary">{courseProfessor?.email || "Email"}</div>
+                    </div>
+                  </div>
+
+                  <h3 className="text-lg mb-4" style={{ fontWeight: 600, borderBottom: "1px solid var(--border)", paddingBottom: "var(--space-2)", display: "flex", justifyContent: "space-between" }}>
+                    <span>Students</span>
+                    <span className="text-secondary" style={{ fontSize: "var(--font-sm)", fontWeight: "normal" }}>{enrolledStudents.length} students</span>
+                  </h3>
+                  {enrolledStudents.length === 0 ? (
+                    <p className="empty-state-text text-center" style={{ padding: "var(--space-6)" }}>No students enrolled yet.</p>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+                      {enrolledStudents.map(student => (
+                        <div key={student._id} className="flex items-center" style={{ gap: "var(--space-4)", padding: "var(--space-3)", background: "var(--surface-hover)", borderRadius: "var(--radius-md)", border: "1px solid var(--border)" }}>
+                          <div className="sidebar-avatar" style={{ margin: 0, width: 36, height: 36, background: "rgba(255,255,255,0.05)", fontSize: "14px", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "50%" }}>
+                            {student.name?.[0]?.toUpperCase() || "S"}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 500, color: "var(--text-primary)" }}>{student.name}</div>
+                            <div className="text-sm text-secondary">{student.email}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* ── Submit Work Tab ── */}
             {activeTab === "submit" && (
@@ -453,6 +606,49 @@ export default function StudentDashboard() {
           </div>
         </main>
       </div>
+
+      {/* Floating Action Button */}
+      <button className="fab-btn" title="Enroll in Course" onClick={() => setShowEnrollModal(true)}>
+        +
+      </button>
+
+      {/* Enrollment Modal */}
+      {showEnrollModal && (
+        <div className="modal-overlay" onClick={() => setShowEnrollModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Join a Classroom</h3>
+              <button className="modal-close" onClick={() => setShowEnrollModal(false)}>
+                &times;
+              </button>
+            </div>
+            <form onSubmit={handleEnroll}>
+              <div className="form-group mb-6">
+                <label>Enrollment Code </label>
+                <div className="text-sm text-secondary mb-2">Ask your professor for the 6-character class code.</div>
+                <input
+                  type="text"
+                  className="enroll-code-disp"
+                  style={{
+                    padding: "0.5rem",
+                    margin: "0",
+                    width: "100%",
+                    textTransform: "uppercase",
+                  }}
+                  placeholder="e.g. XY78ZP"
+                  value={enrollmentCode}
+                  onChange={(e) => setEnrollmentCode(e.target.value.toUpperCase())}
+                  required
+                  maxLength={6}
+                />
+              </div>
+              <button type="submit" className="btn-primary btn-full" disabled={enrolling}>
+                {enrolling ? <><span className="spinner"></span> Joining...</> : "Join Classroom"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }

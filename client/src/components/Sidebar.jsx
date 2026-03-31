@@ -17,6 +17,22 @@ const icons = {
       <line x1="21" y1="12" x2="9" y2="12" />
     </svg>
   ),
+  grid: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+    </svg>
+  ),
+  users: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 00-3-3.87" />
+      <path d="M16 3.13a4 4 0 010 7.75" />
+    </svg>
+  ),
   // Professor icons
   upload: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -88,6 +104,8 @@ const icons = {
 };
 
 const professorTabs = [
+  { key: "courses", label: "My Courses", icon: icons.grid },
+  { key: "people", label: "People", icon: icons.users },
   { key: "materials", label: "Materials", icon: icons.upload },
   { key: "assignments", label: "Assignments", icon: icons.assignment },
   { key: "announcements", label: "Announcements", icon: icons.megaphone },
@@ -96,6 +114,8 @@ const professorTabs = [
 ];
 
 const studentTabs = [
+  { key: "courses", label: "My Courses", icon: icons.grid },
+  { key: "people", label: "People", icon: icons.users },
   { key: "submit", label: "Submit Work", icon: icons.send },
   { key: "doubts", label: "Ask AI", icon: icons.bot },
   { key: "materials", label: "Materials", icon: icons.book },
@@ -103,7 +123,7 @@ const studentTabs = [
   { key: "leaderboard", label: "Leaderboard", icon: icons.trophy },
 ];
 
-export default function Sidebar({ activeTab, onTabChange, role }) {
+export default function Sidebar({ activeTab, onTabChange, role, hasCourseSelected }) {
   const { user, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const tabs = role === "professor" ? professorTabs : studentTabs;
@@ -150,16 +170,24 @@ export default function Sidebar({ activeTab, onTabChange, role }) {
           <div className="sidebar-section-label">
             {role === "professor" ? "Teaching" : "Learning"}
           </div>
-          {tabs.map((tab) => (
-            <button
-              key={tab.key}
-              className={`sidebar-link${activeTab === tab.key ? " active" : ""}`}
-              onClick={() => handleTabClick(tab.key)}
-            >
-              {tab.icon}
-              <span>{tab.label}</span>
-            </button>
-          ))}
+          {tabs.map((tab) => {
+            const isDisabled = !hasCourseSelected && tab.key !== "courses";
+            return (
+              <button
+                key={tab.key}
+                className={`sidebar-link${activeTab === tab.key ? " active" : ""}`}
+                onClick={() => {
+                  if (isDisabled) return;
+                  handleTabClick(tab.key);
+                }}
+                style={isDisabled ? { opacity: 0.5, cursor: "not-allowed" } : {}}
+                title={isDisabled ? "Please select a course first" : ""}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </nav>
 
         <div className="sidebar-footer">

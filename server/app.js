@@ -14,6 +14,7 @@ const doubtRoutes = require("./routes/doubtRoutes");
 const leaderboardRoutes = require("./routes/leaderboardRoutes");
 const announcementRoutes = require("./routes/announcementRoutes");
 const analyticsRoutes = require("./routes/analyticsRoutes");
+const courseRoutes = require("./routes/courseRoutes");
 
 const app = express();
 
@@ -46,6 +47,7 @@ app.use("/api/doubts", doubtRoutes);
 app.use("/api/leaderboard", leaderboardRoutes);
 app.use("/api/announcements", announcementRoutes);
 app.use("/api/analytics", analyticsRoutes);
+app.use("/api/courses", courseRoutes);
 
 app.use((err, _req, res, _next) => {
   // eslint-disable-next-line no-console

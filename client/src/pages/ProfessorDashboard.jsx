@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/Toast";
 import Sidebar from "../components/Sidebar";
@@ -8,8 +8,13 @@ export default function ProfessorDashboard() {
   const { user } = useAuth();
   const { addToast } = useToast();
 
-  const [activeTab, setActiveTab] = useState("materials");
-  const [courseId, setCourseId] = useState("CSE101");
+  const [activeTab, setActiveTab] = useState("courses");
+  const [courseId, setCourseId] = useState("");
+  const [selectedCourse, setSelectedCourse] = useState(null);
+  const [myCourses, setMyCourses] = useState([]);
+  const [enrolledStudents, setEnrolledStudents] = useState([]);
+  const [courseProfessor, setCourseProfessor] = useState(null);
+
   const [materials, setMaterials] = useState([]);
   const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api";
   const apiOrigin = apiBase.replace(/\/api\/?$/, "");
@@ -43,6 +48,69 @@ export default function ProfessorDashboard() {
 
   /* ── Loading State ── */
   const [submitting, setSubmitting] = useState(false);
+
+  /* ── Course Creation State ── */
+  const [newCourseId, setNewCourseId] = useState("");
+  const [newCourseName, setNewCourseName] = useState("");
+  const [newCourseDesc, setNewCourseDesc] = useState("");
+
+  const loadMyCourses = async () => {
+    try {
+      const { data } = await api.get("/courses/professor");
+      setMyCourses(data.courses || []);
+    } catch (error) {
+      console.error("Failed to load courses");
+    }
+  };
+
+  useEffect(() => {
+    loadMyCourses();
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "courses") {
+      setSelectedCourse(null);
+      setCourseId("");
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === "people" && courseId) {
+      loadStudents();
+    }
+  }, [activeTab, courseId]);
+
+  const loadStudents = async () => {
+    try {
+      const { data } = await api.get(`/courses/${courseId}/students`);
+      setEnrolledStudents(data.students || []);
+      setCourseProfessor(data.professor || null);
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to load students", "error");
+    }
+  };
+
+  const handleCreateCourse = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      await api.post("/courses", {
+        courseId: newCourseId,
+        name: newCourseName,
+        description: newCourseDesc,
+        color: ["#6366f1", "#06b6d4", "#8b5cf6", "#f59e0b", "#10b981", "#ec4899"][Math.floor(Math.random() * 6)]
+      });
+      addToast("Course created! Enrollment code generated.", "success");
+      setNewCourseId("");
+      setNewCourseName("");
+      setNewCourseDesc("");
+      loadMyCourses();
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to create course", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const loadMaterials = async () => {
     try {
@@ -152,6 +220,7 @@ export default function ProfessorDashboard() {
           activeTab={activeTab}
           onTabChange={setActiveTab}
           role="professor"
+          hasCourseSelected={!!selectedCourse}
         />
 
         <main className="app-content">
@@ -161,23 +230,177 @@ export default function ProfessorDashboard() {
             <p>Manage your courses, materials, and track student progress</p>
           </div>
 
-          {/* Course Selector */}
-          <div className="course-bar">
-            <label htmlFor="prof-course-id">📚 Course</label>
-            <input
-              id="prof-course-id"
-              value={courseId}
-              onChange={(e) => setCourseId(e.target.value)}
-              placeholder="e.g. CSE101"
-              style={{ maxWidth: 200 }}
-            />
-            <button className="btn-secondary btn-sm" onClick={recomputeLeaderboard}>
-              Recompute Leaderboard
-            </button>
-          </div>
+          {/* Course Selector or Active Indicator */}
+          {selectedCourse && activeTab !== "courses" && (
+            <div className="course-bar">
+              <div className="selected-course-indicator">
+                <span className="selected-course-icon" style={{ background: selectedCourse.color || "var(--primary)" }}>
+                  {selectedCourse.icon || "📚"}
+                </span>
+                <div className="selected-course-info">
+                  <span className="selected-course-name">{selectedCourse.name}</span>
+                  <span className="selected-course-id">
+                    {selectedCourse.courseId} • Code: {selectedCourse.enrollmentCode}
+                  </span>
+                </div>
+              </div>
+              <button className="btn-secondary btn-sm" onClick={recomputeLeaderboard}>
+                Recompute Leaderboard
+              </button>
+              <button className="btn-ghost btn-sm" onClick={() => { setSelectedCourse(null); setCourseId(""); setActiveTab("courses"); }} style={{ marginLeft: 'auto' }}>
+                ↩ Change Course
+              </button>
+            </div>
+          )}
 
           {/* Tab Content */}
           <div className="tab-content" key={activeTab}>
+
+            {/* ── My Courses Tab ── */}
+            {activeTab === "courses" && (
+              <div>
+                <div className="flex items-center justify-between mb-6">
+                  <div className="section-header" style={{ marginBottom: 0 }}>
+                    <div className="section-icon indigo">📚</div>
+                    <div>
+                      <h2>My Courses</h2>
+                      <p>Manage courses you teach and create new ones</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="course-grid mb-8">
+                  {myCourses.length === 0 ? (
+                    <div className="glass-card-static" style={{ gridColumn: "1 / -1" }}>
+                      <p className="empty-state-text">You haven't created any courses yet.</p>
+                    </div>
+                  ) : (
+                    myCourses.map((c) => (
+                      <div
+                        key={c._id}
+                        className="course-card"
+                        onClick={() => {
+                          setSelectedCourse(c);
+                          setCourseId(c.courseId);
+                          setActiveTab("materials");
+                        }}
+                        style={{ '--course-color': c.color || "var(--primary)" }}
+                      >
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="course-card-icon" style={{ background: c.color || "var(--primary)", margin: 0 }}>
+                            {c.icon || "📚"}
+                          </div>
+                          <div className="badge badge-accent" style={{ fontSize: "14px", padding: "4px 8px" }}>
+                            Code: {c.enrollmentCode}
+                          </div>
+                        </div>
+                        <div className="course-card-content">
+                          <h3 className="course-card-title">{c.name}</h3>
+                          <p className="course-card-id">{c.courseId}</p>
+                        </div>
+                        <div className="course-card-footer">
+                          <span className="course-card-students">👥 {c.students?.length || 0} enrolled students</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <section className="glass-card-static mt-8" style={{ maxWidth: 600 }}>
+                  <div className="section-header">
+                    <div className="section-icon green">➕</div>
+                    <div>
+                      <h2>Create New Course</h2>
+                      <p>Generate an enrollment code to share with your students</p>
+                    </div>
+                  </div>
+                  <form className="form-grid" onSubmit={handleCreateCourse}>
+                    <div className="form-grid two-col">
+                      <div className="form-group">
+                        <label>Course ID</label>
+                        <input
+                          placeholder="e.g. CS201"
+                          value={newCourseId}
+                          onChange={(e) => setNewCourseId(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Course Name</label>
+                        <input
+                          placeholder="e.g. Data Structures"
+                          value={newCourseName}
+                          onChange={(e) => setNewCourseName(e.target.value)}
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div className="form-group">
+                      <label>Description</label>
+                      <textarea
+                        rows={2}
+                        placeholder="Brief overview of the course..."
+                        value={newCourseDesc}
+                        onChange={(e) => setNewCourseDesc(e.target.value)}
+                      />
+                    </div>
+                    <div className="form-actions">
+                      <button type="submit" className="btn-primary btn-full" disabled={submitting}>
+                        {submitting ? <><span className="spinner"></span> Creating...</> : "Create Course"}
+                      </button>
+                    </div>
+                  </form>
+                </section>
+              </div>
+            )}
+
+            {/* ── People Tab ── */}
+            {activeTab === "people" && (
+              <div>
+                <div className="section-header">
+                  <div className="section-icon indigo">👥</div>
+                  <div>
+                    <h2>Class Roster</h2>
+                    <p>View all students enrolled in this course</p>
+                  </div>
+                </div>
+                <div className="glass-card mb-8">
+                  <h3 className="text-lg mb-4" style={{ fontWeight: 600, borderBottom: "1px solid var(--border)", paddingBottom: "var(--space-2)" }}>Professor</h3>
+                  <div className="flex items-center mb-6" style={{ gap: "var(--space-4)" }}>
+                    <div className="sidebar-avatar" style={{ margin: 0, width: 44, height: 44, background: "var(--primary-glow)", color: "var(--primary-light)", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "var(--radius-md)", fontWeight: "bold" }}>
+                      {courseProfessor?.name?.[0]?.toUpperCase() || "P"}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>{courseProfessor?.name || "Professor"}</div>
+                      <div className="text-sm text-secondary">{courseProfessor?.email || "Email"}</div>
+                    </div>
+                  </div>
+
+                  <h3 className="text-lg mb-4" style={{ fontWeight: 600, borderBottom: "1px solid var(--border)", paddingBottom: "var(--space-2)", display: "flex", justifyContent: "space-between" }}>
+                    <span>Students</span>
+                    <span className="text-secondary" style={{ fontSize: "var(--font-sm)", fontWeight: "normal" }}>{enrolledStudents.length} students</span>
+                  </h3>
+                  {enrolledStudents.length === 0 ? (
+                    <p className="empty-state-text text-center" style={{ padding: "var(--space-6)" }}>No students enrolled yet.</p>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+                      {enrolledStudents.map(student => (
+                        <div key={student._id} className="flex items-center" style={{ gap: "var(--space-4)", padding: "var(--space-3)", background: "var(--surface-hover)", borderRadius: "var(--radius-md)", border: "1px solid var(--border)" }}>
+                          <div className="sidebar-avatar" style={{ margin: 0, width: 36, height: 36, background: "rgba(255,255,255,0.05)", fontSize: "14px", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "50%" }}>
+                            {student.name?.[0]?.toUpperCase() || "S"}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 500, color: "var(--text-primary)" }}>{student.name}</div>
+                            <div className="text-sm text-secondary">{student.email}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* ── Materials Tab ── */}
             {activeTab === "materials" && (
               <div className="content-grid two">

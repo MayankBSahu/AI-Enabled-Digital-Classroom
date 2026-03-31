@@ -18,6 +18,7 @@ const auth = (...allowedRoles) => async (req, res, next) => {
     }
 
     if (allowedRoles.length > 0 && !allowedRoles.includes(user.role)) {
+      console.error(`[Auth] Forbidden! User role: "${user.role}" not in allowed:`, allowedRoles);
       return res.status(403).json({ message: "Forbidden for this role" });
     }
 
