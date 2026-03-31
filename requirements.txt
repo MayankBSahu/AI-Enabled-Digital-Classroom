@@ -1,0 +1,3 @@
+# Root Python dependencies entrypoint
+# Installs the AI microservice requirements.
+-r microservices/ai-service/requirements.txt
