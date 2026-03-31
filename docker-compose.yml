@@ -1,0 +1,71 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: adc-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  chroma:
+    image: chromadb/chroma:0.6.3
+    container_name: adc-chroma
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/data
+
+  ai-service:
+    build:
+      context: ./microservices/ai-service
+      dockerfile: Dockerfile
+    container_name: adc-ai-service
+    restart: unless-stopped
+    env_file:
+      - ./microservices/ai-service/.env
+    environment:
+      CHROMA_PATH: /data/chroma
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/data/chroma
+    depends_on:
+      - chroma
+
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: adc-api
+    restart: unless-stopped
+    env_file:
+      - ./server/.env
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/ai_digital_classroom
+      AI_SERVICE_URL: http://ai-service:8000
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./server/uploads:/app/uploads
+    depends_on:
+      - mongo
+      - ai-service
+
+  web:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: adc-web
+    restart: unless-stopped
+    env_file:
+      - ./client/.env
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+volumes:
+  mongo_data:
+  chroma_data:
