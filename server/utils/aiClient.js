@@ -3,7 +3,7 @@ const env = require("../config/env");
 
 const aiClient = axios.create({
   baseURL: env.aiServiceUrl,
-  timeout: 20000
+  timeout: 60000
 });
 
 const evaluateAssignment = async (payload) => {

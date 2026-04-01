@@ -77,7 +77,27 @@ const listSubmissionsByAssignment = async (req, res) => {
   return res.json({ submissions });
 };
 
+const getMySubmissions = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+    const assignments = await Assignment.find({ courseId }).lean();
+    const assignmentIds = assignments.map(a => a._id);
+    const submissions = await Submission.find({
+      assignmentId: { $in: assignmentIds },
+      studentId: req.user._id
+    })
+      .populate("assignmentId", "title maxMarks dueDate")
+      .sort({ createdAt: -1 })
+      .lean();
+    return res.json({ submissions });
+  } catch (error) {
+    console.error("Get my submissions error:", error.message);
+    return res.status(500).json({ message: "Failed to load submissions" });
+  }
+};
+
 module.exports = {
   uploadSubmission,
-  listSubmissionsByAssignment
+  listSubmissionsByAssignment,
+  getMySubmissions
 };

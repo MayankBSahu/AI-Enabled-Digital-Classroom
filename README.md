@@ -19,6 +19,7 @@ cp microservices/ai-service/.env.example microservices/ai-service/.env
 ```
 
 2. Start full stack:
+Install Docker App first. Then:
 ```bash
 docker compose up --build
 ```
@@ -41,7 +42,7 @@ npm run dev
 ```bash
 cd microservices/ai-service
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
 ### Frontend
