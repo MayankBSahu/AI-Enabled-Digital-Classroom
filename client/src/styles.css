@@ -1567,17 +1567,35 @@ button:disabled,
   height: 14px;
 }
 
+/* ── Utility Classes ── */
+.flex { display: flex; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.text-center { text-align: center; }
+.text-sm { font-size: var(--font-sm); }
+.text-lg { font-size: var(--font-lg); }
+.text-secondary { color: var(--text-secondary); }
+
+.mb-2 { margin-bottom: var(--space-2); }
+.mb-4 { margin-bottom: var(--space-4); }
+.mb-6 { margin-bottom: var(--space-6); }
+.mb-8 { margin-bottom: var(--space-8); }
+.mt-2 { margin-top: var(--space-2); }
+.mt-4 { margin-top: var(--space-4); }
+.mt-8 { margin-top: var(--space-8); }
+
 /* ── Modals & FABs for Classrooms ── */
 .fab-btn {
   position: fixed;
   bottom: var(--space-8);
   right: var(--space-8);
-  width: 60px;
-  height: 60px;
+  width: 56px;
+  height: 56px;
   border-radius: var(--radius-full);
   background: var(--gradient-primary);
   color: #fff;
   font-size: 28px;
+  line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1586,12 +1604,48 @@ button:disabled,
   border: none;
   z-index: 50;
   transition: all var(--transition-base);
+  padding: 0;
 }
 
 .fab-btn:hover {
   transform: translateY(-4px) scale(1.05);
   box-shadow: 0 8px 25px var(--primary-glow);
   filter: brightness(1.1);
+}
+
+/* ── Announcement Items ── */
+.announcement-item {
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  transition: border-color var(--transition-fast);
+}
+
+.announcement-item:hover {
+  border-color: var(--border-hover);
+}
+
+.announcement-title {
+  font-size: var(--font-md);
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: var(--space-2);
+}
+
+.announcement-body {
+  font-size: var(--font-base);
+  color: var(--text-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.announcement-date {
+  font-size: var(--font-xs);
+  color: var(--text-tertiary);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
 }
 
 .modal-overlay {

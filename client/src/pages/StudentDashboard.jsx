@@ -33,6 +33,7 @@ export default function StudentDashboard() {
   const [selectedAssignmentId, setSelectedAssignmentId] = useState("");
   const [submissionFile, setSubmissionFile] = useState(null);
   const [submissionText, setSubmissionText] = useState("");
+  const [mySubmissions, setMySubmissions] = useState([]);
 
   /* ── Doubts / Chat ── */
   const [question, setQuestion] = useState("");
@@ -70,6 +71,7 @@ export default function StudentDashboard() {
     else if (activeTab === "materials" || activeTab === "files") loadMaterials();
     else if (activeTab === "leaderboard") loadLeaderboard();
     else if (activeTab === "doubts") loadChatHistory();
+    else if (activeTab === "submit") { loadAssignments(); loadMySubmissions(); }
   }, [activeTab, courseId]);
 
   const loadStudents = async () => {
@@ -111,6 +113,15 @@ export default function StudentDashboard() {
     }
   };
 
+  const loadMySubmissions = async () => {
+    try {
+      const { data } = await api.get(`/submissions/my/${courseId}`);
+      setMySubmissions(data.submissions || []);
+    } catch (error) {
+      console.error("Failed to load submissions");
+    }
+  };
+
   const submitAssignment = async (e) => {
     e.preventDefault();
     if (!selectedAssignmentId || !submissionFile) {
@@ -129,6 +140,7 @@ export default function StudentDashboard() {
       addToast(`Submitted! ${marks != null ? `Score: ${marks}` : "Evaluation pending..."}`, "success");
       setSubmissionFile(null);
       setSubmissionText("");
+      await loadMySubmissions();
     } catch (error) {
       addToast(error.response?.data?.message || "Submission failed", "error");
     } finally {
@@ -241,12 +253,6 @@ export default function StudentDashboard() {
                   <span className="selected-course-id">{selectedCourse.courseId} • {selectedCourse.professor?.name || "Professor"}</span>
                 </div>
               </div>
-              <button className="btn-secondary btn-sm" onClick={loadAssignments}>
-                Load Assignments
-              </button>
-              <button className="btn-secondary btn-sm" onClick={loadMaterials}>
-                Load Materials
-              </button>
               <button className="btn-ghost btn-sm" onClick={() => { setSelectedCourse(null); setCourseId(""); setActiveTab("courses"); }} style={{ marginLeft: 'auto' }}>
                 ↩ Change Course
               </button>
@@ -405,14 +411,6 @@ export default function StudentDashboard() {
                       </select>
                     </div>
 
-                    {assignments.length === 0 && (
-                      <div className="item-card">
-                        <p className="item-card-desc">
-                          💡 Click "Load Assignments" in the course bar above to see available assignments.
-                        </p>
-                      </div>
-                    )}
-
                     <div className="form-group">
                       <label>Upload File (PDF/DOCX)</label>
                       <input
@@ -445,6 +443,67 @@ export default function StudentDashboard() {
                     </div>
                   </form>
                 </section>
+
+                {/* Past Submissions */}
+                <section className="glass-card-static mt-8">
+                  <div className="section-header">
+                    <div className="section-icon green">📋</div>
+                    <div>
+                      <h2>My Submissions</h2>
+                      <p>{mySubmissions.length} submission{mySubmissions.length !== 1 ? "s" : ""}</p>
+                    </div>
+                  </div>
+
+                  {mySubmissions.length === 0 ? (
+                    <div className="empty-state">
+                      <div className="empty-state-icon">📝</div>
+                      <p className="empty-state-text">No submissions yet. Submit your first assignment above!</p>
+                    </div>
+                  ) : (
+                    <div className="form-grid">
+                      {mySubmissions.map((s) => (
+                        <div key={s._id} className="item-card">
+                          <div className="item-card-header">
+                            <span className="item-card-title">{s.assignmentId?.title || "Assignment"}</span>
+                            <span className={`badge ${s.status === "evaluated" ? "badge-accent" : s.status === "error" ? "badge-warning" : "badge-primary"}`}>
+                              {s.status}
+                            </span>
+                          </div>
+                          {s.aiResult && s.status === "evaluated" && (
+                            <div style={{ marginTop: "var(--space-3)" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", marginBottom: "var(--space-2)" }}>
+                                <span style={{ fontWeight: 700, fontSize: "var(--font-xl)", color: "var(--accent)" }}>
+                                  {s.aiResult.marks ?? "—"}
+                                </span>
+                                <span className="text-secondary text-sm">/ {s.assignmentId?.maxMarks || 100} marks</span>
+                              </div>
+                              <p className="item-card-desc">{s.aiResult.feedback}</p>
+                              {s.aiResult.mistakes?.length > 0 && (
+                                <div style={{ marginTop: "var(--space-2)" }}>
+                                  <span className="text-sm" style={{ fontWeight: 600, color: "var(--warning)" }}>Mistakes:</span>
+                                  <ul style={{ paddingLeft: "var(--space-5)", marginTop: "var(--space-1)", color: "var(--text-secondary)", fontSize: "var(--font-sm)" }}>
+                                    {s.aiResult.mistakes.map((m, i) => <li key={i}>{m}</li>)}
+                                  </ul>
+                                </div>
+                              )}
+                              {s.aiResult.suggestions?.length > 0 && (
+                                <div style={{ marginTop: "var(--space-2)" }}>
+                                  <span className="text-sm" style={{ fontWeight: 600, color: "var(--primary-light)" }}>Suggestions:</span>
+                                  <ul style={{ paddingLeft: "var(--space-5)", marginTop: "var(--space-1)", color: "var(--text-secondary)", fontSize: "var(--font-sm)" }}>
+                                    {s.aiResult.suggestions.map((sg, i) => <li key={i}>{sg}</li>)}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          <div className="item-card-meta" style={{ marginTop: "var(--space-2)" }}>
+                            {new Date(s.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
               </div>
             )}
 
@@ -460,6 +519,7 @@ export default function StudentDashboard() {
                       <p style={{ fontSize: "var(--font-xs)", color: "var(--text-tertiary)" }}>Answers from course materials using RAG</p>
                     </div>
                   </div>
+                  <button className="btn-ghost btn-sm" onClick={() => { setChatMessages([]); }} title="Clear chat" style={{ color: "var(--error)" }}>🗑️ Clear</button>
                   <button className="btn-ghost btn-sm" onClick={loadChatHistory} title="Refresh history">↻</button>
                 </div>
 
@@ -546,14 +606,14 @@ export default function StudentDashboard() {
                       <p>Slides, notes, and resources from your professor</p>
                     </div>
                   </div>
-                  <button className="btn-primary" onClick={loadMaterials}>Refresh</button>
+                  <button className="btn-secondary btn-sm" onClick={loadMaterials}>Refresh</button>
                 </div>
 
                 {materials.length === 0 ? (
                   <div className="glass-card-static">
                     <div className="empty-state">
                       <div className="empty-state-icon">📚</div>
-                      <p className="empty-state-text">No materials loaded. Click "Refresh" or "Load Materials" to fetch course content.</p>
+                      <p className="empty-state-text">No materials available yet for this course.</p>
                     </div>
                   </div>
                 ) : (
@@ -591,14 +651,14 @@ export default function StudentDashboard() {
                       <p>Latest updates from your professor</p>
                     </div>
                   </div>
-                  <button className="btn-primary" onClick={loadAnnouncements}>Refresh</button>
+                  <button className="btn-secondary btn-sm" onClick={loadAnnouncements}>Refresh</button>
                 </div>
 
                 {announcements.length === 0 ? (
                   <div className="glass-card-static">
                     <div className="empty-state">
                       <div className="empty-state-icon">📢</div>
-                      <p className="empty-state-text">No announcements yet. Click "Refresh" to check for updates.</p>
+                      <p className="empty-state-text">No announcements yet for this course.</p>
                     </div>
                   </div>
                 ) : (
@@ -636,14 +696,14 @@ export default function StudentDashboard() {
                       <p>See how you rank among your peers</p>
                     </div>
                   </div>
-                  <button className="btn-primary" onClick={loadLeaderboard}>Refresh</button>
+                  <button className="btn-secondary btn-sm" onClick={loadLeaderboard}>Refresh</button>
                 </div>
 
                 {leaderboard.length === 0 ? (
                   <div className="glass-card-static">
                     <div className="empty-state">
                       <div className="empty-state-icon">🏆</div>
-                      <p className="empty-state-text">No leaderboard data yet. Click "Refresh" to load rankings.</p>
+                      <p className="empty-state-text">No leaderboard data available yet.</p>
                     </div>
                   </div>
                 ) : (
@@ -684,10 +744,12 @@ export default function StudentDashboard() {
         </main>
       </div>
 
-      {/* Floating Action Button */}
-      <button className="fab-btn" title="Enroll in Course" onClick={() => setShowEnrollModal(true)}>
-        +
-      </button>
+      {/* Floating Action Button - only on Courses tab */}
+      {activeTab === "courses" && (
+        <button className="fab-btn" title="Enroll in Course" onClick={() => setShowEnrollModal(true)}>
+          +
+        </button>
+      )}
 
       {/* Enrollment Modal */}
       {showEnrollModal && (

@@ -249,9 +249,6 @@ export default function ProfessorDashboard() {
                   </span>
                 </div>
               </div>
-              <button className="btn-secondary btn-sm" onClick={recomputeLeaderboard}>
-                Recompute Leaderboard
-              </button>
               <button className="btn-ghost btn-sm" onClick={() => { setSelectedCourse(null); setCourseId(""); setActiveTab("courses"); }} style={{ marginLeft: 'auto' }}>
                 ↩ Change Course
               </button>
@@ -725,54 +722,6 @@ export default function ProfessorDashboard() {
               </div>
             )}
 
-            {/* ── Uploaded Files Tab ── */}
-            {activeTab === "files" && (
-              <div>
-                <div className="flex items-center justify-between mb-6">
-                  <div className="section-header" style={{ marginBottom: 0 }}>
-                    <div className="section-icon indigo">📁</div>
-                    <div>
-                      <h2>Uploaded Materials</h2>
-                      <p>All materials for {courseId}</p>
-                    </div>
-                  </div>
-                  <button className="btn-primary" onClick={loadMaterials}>Refresh</button>
-                </div>
-
-                {materials.length === 0 ? (
-                  <div className="glass-card-static">
-                    <div className="empty-state">
-                      <div className="empty-state-icon">📂</div>
-                      <p className="empty-state-text">No materials uploaded yet. Go to the Materials tab to upload course content.</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="form-grid">
-                    {materials.map((m) => (
-                      <div key={m._id} className="item-card">
-                        <div className="item-card-header">
-                          <span className="item-card-title">{m.title}</span>
-                          <span className="badge badge-primary">{m.type}</span>
-                        </div>
-                        <p className="item-card-desc">{m.description || "No description"}</p>
-                        <div className="item-card-meta">
-                          {m.vectorized ? `✅ Indexed (${m.indexedChunks || 0} chunks)` : "⏳ Not indexed"} •{" "}
-                          {new Date(m.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}
-                        </div>
-                        {m.fileUrl && (
-                          <div className="item-card-actions">
-                            <a href={toPublicFileUrl(m.fileUrl)} target="_blank" rel="noreferrer" className="link-btn">
-                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
-                              Open File
-                            </a>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         </main>
       </div>

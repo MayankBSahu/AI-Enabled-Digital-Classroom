@@ -110,7 +110,6 @@ const professorTabs = [
   { key: "assignments", label: "Assignments", icon: icons.assignment },
   { key: "announcements", label: "Announcements", icon: icons.megaphone },
   { key: "analytics", label: "Analytics", icon: icons.chart },
-  { key: "files", label: "Uploaded Files", icon: icons.files },
 ];
 
 const studentTabs = [
