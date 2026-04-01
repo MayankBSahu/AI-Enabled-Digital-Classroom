@@ -1,4 +1,5 @@
 const Doubt = require("../models/Doubt");
+const ChatClear = require("../models/ChatClear");
 const { askDoubt, scoreDoubtQuality } = require("../utils/aiClient");
 
 const askCourseDoubt = async (req, res) => {
@@ -59,10 +60,18 @@ const askCourseDoubt = async (req, res) => {
 const getCourseDoubts = async (req, res) => {
   try {
     const { courseId } = req.params;
-    const doubts = await Doubt.find({
+
+    // Check if student has cleared their chat — only show doubts after that
+    const clearRecord = await ChatClear.findOne({ courseId, studentId: req.user._id }).lean();
+    const filter = {
       courseId,
       studentId: req.user._id
-    })
+    };
+    if (clearRecord?.clearedAt) {
+      filter.createdAt = { $gt: clearRecord.clearedAt };
+    }
+
+    const doubts = await Doubt.find(filter)
       .sort({ createdAt: 1 })
       .lean();
 
@@ -76,11 +85,13 @@ const getCourseDoubts = async (req, res) => {
 const clearCourseDoubts = async (req, res) => {
   try {
     const { courseId } = req.params;
-    const result = await Doubt.deleteMany({
-      courseId,
-      studentId: req.user._id
-    });
-    return res.status(200).json({ message: "Chat history cleared", deleted: result.deletedCount });
+    // Don't delete — just mark the clear timestamp
+    await ChatClear.findOneAndUpdate(
+      { courseId, studentId: req.user._id },
+      { clearedAt: new Date() },
+      { upsert: true, new: true }
+    );
+    return res.status(200).json({ message: "Chat history cleared" });
   } catch (error) {
     console.error("Clear doubts error:", error.message);
     return res.status(500).json({ message: "Failed to clear history" });

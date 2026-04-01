@@ -130,6 +130,20 @@ export default function ProfessorDashboard() {
     }
   };
 
+  const reindexMaterials = async () => {
+    if (!window.confirm("Re-index all materials for the AI? This will re-extract PDF text and update the AI knowledge base.")) return;
+    try {
+      setSubmitting(true);
+      const { data } = await api.post(`/materials/reindex/${courseId}`);
+      addToast(data.message || "Re-indexing complete!", "success");
+      await loadMaterials();
+    } catch (error) {
+      addToast(error.response?.data?.message || "Re-index failed", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const loadAssignments = async () => {
     try {
       const { data } = await api.get(`/assignments/course/${courseId}`);
@@ -536,11 +550,15 @@ export default function ProfessorDashboard() {
                 )}
 
                 <div className="item-card mt-4" style={{ maxWidth: 720 }}>
-                  <p className="item-card-desc">
-                    💡 <strong>How RAG Works:</strong> When you upload material text, it's automatically chunked and indexed into
-                    the ChromaDB vector database. Students can then ask doubts that are answered
-                    using only your course materials — ensuring accurate, contextual responses.
-                  </p>
+                  <div className="flex items-center justify-between">
+                    <p className="item-card-desc" style={{ margin: 0 }}>
+                      💡 <strong>How RAG Works:</strong> PDFs are automatically extracted, chunked, and indexed into
+                      ChromaDB. Students can ask the AI about content in your uploaded materials.
+                    </p>
+                    <button className="btn-secondary btn-sm" onClick={reindexMaterials} disabled={submitting} style={{ whiteSpace: "nowrap", marginLeft: "var(--space-4)" }}>
+                      {submitting ? "Re-indexing..." : "🔄 Re-index AI"}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

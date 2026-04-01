@@ -55,20 +55,24 @@ async def ask_doubt(payload: DoubtRequest) -> Dict[str, Any]:
 
     top = rows[:3]
     context = "\n\n".join(r["text"] for r in top)
+
+    # Build list of source material titles for the AI to reference
+    material_titles = list(dict.fromkeys(r["meta"].get("title", "") for r in rows if r["meta"].get("title")))
+    materials_list = ", ".join(f'"{t}"' for t in material_titles) if material_titles else "unknown materials"
     
     answer = ""
     
     if groq_client:
         try:
             messages = [
-                {"role": "system", "content": "You are a helpful AI teaching assistant for a digital classroom. Answer student questions using ONLY the provided course context. Be conversational and helpful. If you cannot find the answer in the context, say so honestly."},
+                {"role": "system", "content": f"You are a helpful AI teaching assistant for a digital classroom. The course has these uploaded materials: {materials_list}. Answer student questions using ONLY the provided course context. When referencing content, mention which material (by name) it comes from. Be conversational and helpful. If you cannot find the answer in the context, say so honestly."},
             ]
             # Inject conversation history for multi-turn awareness
             for h in (payload.history or [])[-5:]:
                 messages.append({"role": "user", "content": h.question})
                 messages.append({"role": "assistant", "content": h.answer})
             # Current question with context
-            prompt = f"Course material context:\n{context}\n\nStudent's question: {payload.question}"
+            prompt = f"Course material context (from materials: {materials_list}):\n{context}\n\nStudent's question: {payload.question}"
             messages.append({"role": "user", "content": prompt})
             response = await groq_client.chat.completions.create(
                 model=GROQ_MODEL,
