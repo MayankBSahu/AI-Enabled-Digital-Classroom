@@ -107,7 +107,6 @@ export default function StudentDashboard() {
       if (data.assignments?.length) {
         setSelectedAssignmentId(data.assignments[0]._id);
       }
-      addToast("Assignments loaded", "success");
     } catch (error) {
       addToast(error.response?.data?.message || "Failed to load assignments", "error");
     }
@@ -163,6 +162,17 @@ export default function StudentDashboard() {
     }
   };
 
+  const clearChatHistory = async () => {
+    if (!window.confirm("Are you sure you want to permanently delete your entire chat history for this course? This action cannot be undone.")) return;
+    try {
+      await api.delete(`/doubts/course/${courseId}`);
+      setChatMessages([]);
+      addToast("Chat history cleared", "success");
+    } catch (error) {
+      addToast("Failed to clear history", "error");
+    }
+  };
+
   const askDoubt = async (e) => {
     if (e) e.preventDefault();
     if (!question.trim()) return;
@@ -188,7 +198,6 @@ export default function StudentDashboard() {
     try {
       const { data } = await api.get(`/leaderboard/${courseId}`);
       setLeaderboard(data.leaderboard || []);
-      addToast("Leaderboard loaded", "success");
     } catch (error) {
       addToast(error.response?.data?.message || "Failed to load leaderboard", "error");
     }
@@ -198,7 +207,6 @@ export default function StudentDashboard() {
     try {
       const { data } = await api.get(`/announcements/course/${courseId}`);
       setAnnouncements(data.announcements || []);
-      addToast("Announcements loaded", "success");
     } catch (error) {
       addToast(error.response?.data?.message || "Failed to load announcements", "error");
     }
@@ -208,7 +216,6 @@ export default function StudentDashboard() {
     try {
       const { data } = await api.get(`/materials/course/${courseId}`);
       setMaterials(data.materials || []);
-      addToast("Materials loaded", "success");
     } catch (error) {
       addToast(error.response?.data?.message || "Failed to load materials", "error");
     }
@@ -519,8 +526,7 @@ export default function StudentDashboard() {
                       <p style={{ fontSize: "var(--font-xs)", color: "var(--text-tertiary)" }}>Answers from course materials using RAG</p>
                     </div>
                   </div>
-                  <button className="btn-ghost btn-sm" onClick={() => { setChatMessages([]); }} title="Clear chat" style={{ color: "var(--error)" }}>🗑️ Clear</button>
-                  <button className="btn-ghost btn-sm" onClick={loadChatHistory} title="Refresh history">↻</button>
+                  <button className="btn-ghost btn-sm" onClick={clearChatHistory} title="Clear chat history permanently" style={{ color: "var(--error)" }}>🗑️ Clear</button>
                 </div>
 
                 {/* Chat Messages */}

@@ -73,4 +73,18 @@ const getCourseDoubts = async (req, res) => {
   }
 };
 
-module.exports = { askCourseDoubt, getCourseDoubts };
+const clearCourseDoubts = async (req, res) => {
+  try {
+    const { courseId } = req.params;
+    const result = await Doubt.deleteMany({
+      courseId,
+      studentId: req.user._id
+    });
+    return res.status(200).json({ message: "Chat history cleared", deleted: result.deletedCount });
+  } catch (error) {
+    console.error("Clear doubts error:", error.message);
+    return res.status(500).json({ message: "Failed to clear history" });
+  }
+};
+
+module.exports = { askCourseDoubt, getCourseDoubts, clearCourseDoubts };

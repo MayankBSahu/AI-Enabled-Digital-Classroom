@@ -38,6 +38,9 @@ export default function ProfessorDashboard() {
   const [assignmentRubric, setAssignmentRubric] = useState("Correctness,Clarity,Examples");
   const [maxMarks, setMaxMarks] = useState(100);
   const [dueDate, setDueDate] = useState("");
+  const [assignments, setAssignments] = useState([]);
+  const [selectedViewAssignment, setSelectedViewAssignment] = useState(null);
+  const [assignmentSubmissions, setAssignmentSubmissions] = useState([]);
 
   /* ── Announcement State ── */
   const [announcementTitle, setAnnouncementTitle] = useState("");
@@ -74,6 +77,7 @@ export default function ProfessorDashboard() {
     else if (activeTab === "materials" || activeTab === "files") loadMaterials();
     else if (activeTab === "announcements") loadAnnouncements();
     else if (activeTab === "analytics") loadAnalytics();
+    else if (activeTab === "assignments") loadAssignments();
   }, [activeTab, courseId]);
 
   const loadAnnouncements = async () => {
@@ -121,9 +125,26 @@ export default function ProfessorDashboard() {
     try {
       const { data } = await api.get(`/materials/course/${courseId}`);
       setMaterials(data.materials || []);
-      addToast("Materials loaded successfully", "success");
     } catch (error) {
       addToast(error.response?.data?.message || "Failed to load materials", "error");
+    }
+  };
+
+  const loadAssignments = async () => {
+    try {
+      const { data } = await api.get(`/assignments/course/${courseId}`);
+      setAssignments(data.assignments || []);
+    } catch (error) {
+      console.error("Failed to load assignments");
+    }
+  };
+
+  const loadSubmissions = async (assignmentId) => {
+    try {
+      const { data } = await api.get(`/submissions/${assignmentId}`);
+      setAssignmentSubmissions(data.submissions || []);
+    } catch (error) {
+      addToast("Failed to load submissions", "error");
     }
   };
 
@@ -168,6 +189,7 @@ export default function ProfessorDashboard() {
       setAssignmentTitle("");
       setAssignmentDescription("");
       setDueDate("");
+      await loadAssignments();
     } catch (error) {
       addToast(error.response?.data?.message || "Failed to create assignment", "error");
     } finally {
@@ -207,7 +229,6 @@ export default function ProfessorDashboard() {
     try {
       const { data } = await api.get(`/analytics/${courseId}`);
       setAnalytics(data);
-      addToast("Analytics loaded", "success");
     } catch (error) {
       addToast(error.response?.data?.message || "Failed to load analytics", "error");
     }
@@ -526,8 +547,8 @@ export default function ProfessorDashboard() {
 
             {/* ── Assignments Tab ── */}
             {activeTab === "assignments" && (
-              <div style={{ maxWidth: 640 }}>
-                <section className="glass-card-static">
+              <div>
+                <section className="glass-card-static" style={{ maxWidth: 640 }}>
                   <div className="section-header">
                     <div className="section-icon indigo">📝</div>
                     <div>
@@ -569,6 +590,91 @@ export default function ProfessorDashboard() {
                       </button>
                     </div>
                   </form>
+                </section>
+
+                {/* Past Assignments */}
+                <section className="glass-card-static mt-8">
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="section-header" style={{ marginBottom: 0 }}>
+                      <div className="section-icon cyan">📋</div>
+                      <div>
+                        <h2>Past Assignments</h2>
+                        <p>{assignments.length} assignment{assignments.length !== 1 ? "s" : ""} created</p>
+                      </div>
+                    </div>
+                    <button className="btn-secondary btn-sm" onClick={loadAssignments}>Refresh</button>
+                  </div>
+
+                  {assignments.length === 0 ? (
+                    <div className="empty-state">
+                      <div className="empty-state-icon">📝</div>
+                      <p className="empty-state-text">No assignments created yet for this course.</p>
+                    </div>
+                  ) : (
+                    <div className="form-grid">
+                      {assignments.map((a) => (
+                        <div key={a._id} className="item-card">
+                          <div className="item-card-header">
+                            <span className="item-card-title">{a.title}</span>
+                            <span className="badge badge-primary">{a.maxMarks} marks</span>
+                          </div>
+                          {a.description && <p className="item-card-desc">{a.description}</p>}
+                          <div className="item-card-meta">
+                            Due: {new Date(a.dueDate).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                            {a.rubric?.length > 0 && ` • Rubric: ${a.rubric.join(", ")}`}
+                          </div>
+                          <div className="item-card-actions" style={{ marginTop: "var(--space-3)" }}>
+                            <button className="btn-secondary btn-sm" onClick={() => { setSelectedViewAssignment(selectedViewAssignment?._id === a._id ? null : a); loadSubmissions(a._id); }}>
+                              {selectedViewAssignment?._id === a._id ? "▲ Hide Submissions" : "▼ View Submissions"}
+                            </button>
+                          </div>
+
+                          {selectedViewAssignment?._id === a._id && (
+                            <div style={{ marginTop: "var(--space-4)", borderTop: "1px solid var(--border)", paddingTop: "var(--space-4)" }}>
+                              {assignmentSubmissions.length === 0 ? (
+                                <p className="text-secondary text-sm">No submissions yet for this assignment.</p>
+                              ) : (
+                                <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+                                  {assignmentSubmissions.map((s) => (
+                                    <div key={s._id} style={{ padding: "var(--space-3)", background: "var(--surface-hover)", borderRadius: "var(--radius-md)", border: "1px solid var(--border)" }}>
+                                      <div className="flex items-center justify-between">
+                                        <div>
+                                          <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>{s.studentId?.name || "Student"}</span>
+                                          <span className="text-sm text-secondary" style={{ marginLeft: "var(--space-2)" }}>{s.studentId?.email || ""}</span>
+                                        </div>
+                                        <span className={`badge ${s.status === "evaluated" ? "badge-accent" : s.status === "error" ? "badge-warning" : "badge-primary"}`}>
+                                          {s.status}
+                                        </span>
+                                      </div>
+                                      {s.aiResult && s.status === "evaluated" && (
+                                        <div style={{ marginTop: "var(--space-2)" }}>
+                                          <span style={{ fontWeight: 700, color: "var(--accent)" }}>{s.aiResult.marks ?? "—"}</span>
+                                          <span className="text-secondary text-sm"> / {a.maxMarks} marks</span>
+                                          {s.aiResult.feedback && (
+                                            <p className="text-sm text-secondary" style={{ marginTop: "var(--space-1)" }}>{s.aiResult.feedback}</p>
+                                          )}
+                                        </div>
+                                      )}
+                                      <div className="flex items-center justify-between" style={{ marginTop: "var(--space-1)" }}>
+                                        <span className="text-sm text-secondary">
+                                          Submitted: {new Date(s.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                        </span>
+                                        {s.fileUrl && (
+                                          <a href={toPublicFileUrl(s.fileUrl)} target="_blank" rel="noreferrer" className="link-btn" style={{ fontSize: "var(--font-sm)" }}>
+                                            📎 View File
+                                          </a>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </section>
               </div>
             )}
