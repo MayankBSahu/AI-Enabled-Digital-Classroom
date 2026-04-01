@@ -19,10 +19,16 @@ class EvalResponse(BaseModel):
     confidence: float
 
 
+class HistoryItem(BaseModel):
+    question: str
+    answer: str
+
+
 class DoubtRequest(BaseModel):
     course_id: str
     student_id: str
     question: str
+    history: List[HistoryItem] = []
 
 
 class Citation(BaseModel):

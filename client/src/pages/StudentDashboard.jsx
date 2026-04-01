@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/Toast";
 import Sidebar from "../components/Sidebar";
@@ -34,10 +34,11 @@ export default function StudentDashboard() {
   const [submissionFile, setSubmissionFile] = useState(null);
   const [submissionText, setSubmissionText] = useState("");
 
-  /* ── Doubts ── */
+  /* ── Doubts / Chat ── */
   const [question, setQuestion] = useState("");
-  const [doubtAnswer, setDoubtAnswer] = useState("");
-  const [doubtScore, setDoubtScore] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
+  const chatEndRef = useRef(null);
+  const chatContainerRef = useRef(null);
 
   /* ── Lists ── */
   const [leaderboard, setLeaderboard] = useState([]);
@@ -63,9 +64,12 @@ export default function StudentDashboard() {
   }, []);
 
   useEffect(() => {
-    if (activeTab === "people" && courseId) {
-      loadStudents();
-    }
+    if (!courseId) return;
+    if (activeTab === "people" || activeTab === "courses") loadStudents();
+    else if (activeTab === "announcements") loadAnnouncements();
+    else if (activeTab === "materials" || activeTab === "files") loadMaterials();
+    else if (activeTab === "leaderboard") loadLeaderboard();
+    else if (activeTab === "doubts") loadChatHistory();
   }, [activeTab, courseId]);
 
   const loadStudents = async () => {
@@ -132,21 +136,39 @@ export default function StudentDashboard() {
     }
   };
 
-  const askDoubt = async (e) => {
-    e.preventDefault();
-    if (!question.trim()) return;
-    setAiThinking(true);
-    setDoubtAnswer("");
-    setDoubtScore(null);
+  const loadChatHistory = async () => {
     try {
-      const { data } = await api.post("/doubts/ask", { courseId, question });
-      setDoubtAnswer(data.doubt?.answer || "No answer generated.");
-      setDoubtScore(data.doubt?.qualityScore ?? null);
-      addToast("AI answered your doubt", "success");
+      const { data } = await api.get(`/doubts/course/${courseId}`);
+      const msgs = [];
+      for (const d of data.doubts || []) {
+        msgs.push({ role: "user", text: d.question, time: d.createdAt });
+        msgs.push({ role: "ai", text: d.answer, time: d.createdAt });
+      }
+      setChatMessages(msgs);
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "auto" }), 100);
     } catch (error) {
+      console.error("Failed to load chat history");
+    }
+  };
+
+  const askDoubt = async (e) => {
+    if (e) e.preventDefault();
+    if (!question.trim()) return;
+    const userMsg = question.trim();
+    setQuestion("");
+    setChatMessages((prev) => [...prev, { role: "user", text: userMsg, time: new Date().toISOString() }]);
+    setAiThinking(true);
+    setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+    try {
+      const { data } = await api.post("/doubts/ask", { courseId, question: userMsg });
+      const answer = data.doubt?.answer || "No answer generated.";
+      setChatMessages((prev) => [...prev, { role: "ai", text: answer, time: new Date().toISOString() }]);
+    } catch (error) {
+      setChatMessages((prev) => [...prev, { role: "ai", text: "Sorry, I encountered an error. Please try again.", time: new Date().toISOString() }]);
       addToast(error.response?.data?.message || "Failed to get answer", "error");
     } finally {
       setAiThinking(false);
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
     }
   };
 
@@ -250,9 +272,9 @@ export default function StudentDashboard() {
                     myCourses.map((c) => (
                       <div
                         key={c._id}
-                        className="course-card"
-                        onClick={() => { setSelectedCourse(c); setCourseId(c.courseId); setActiveTab("submit"); }}
-                        style={{ '--course-color': c.color || "var(--primary)" }}
+                        className={`course-card ${selectedCourse?._id === c._id ? 'selected' : ''}`}
+                        onClick={() => { setSelectedCourse(c); setCourseId(c.courseId); }}
+                        style={{ '--course-color': c.color || "var(--primary)", ...(selectedCourse?._id === c._id ? { border: `2px solid ${c.color || "var(--primary)"}` } : {}) }}
                       >
                         <div className="flex items-center justify-between mb-4">
                           <div className="course-card-icon" style={{ background: c.color || "var(--primary)", margin: 0 }}>
@@ -266,13 +288,38 @@ export default function StudentDashboard() {
                           <h3 className="course-card-title">{c.name}</h3>
                           <p className="course-card-id">{c.professor?.name || "Professor"}</p>
                         </div>
-                        <div className="course-card-footer">
-                          <span className="course-card-students">View Dashboard →</span>
+                        <div className="course-card-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span className="course-card-students text-secondary text-sm">Select to view students</span>
+                          <button className="btn-primary btn-sm" onClick={(e) => { e.stopPropagation(); setSelectedCourse(c); setCourseId(c.courseId); setActiveTab("submit"); }}>View Dashboard →</button>
                         </div>
                       </div>
                     ))
                   )}
                 </div>
+
+                {selectedCourse && (
+                  <div className="glass-card-static mb-8">
+                    <div className="section-header" style={{ marginBottom: "16px" }}>
+                      <div className="section-icon indigo">👥</div>
+                      <div>
+                        <h2 className="text-xl">Enrolled Students • {selectedCourse.name}</h2>
+                        <p className="text-secondary text-sm">Students currently enrolled in the selected course</p>
+                      </div>
+                    </div>
+                    {enrolledStudents.length === 0 ? (
+                      <p className="empty-state-text">No students enrolled yet.</p>
+                    ) : (
+                      <div className="student-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "12px" }}>
+                        {enrolledStudents.map(s => (
+                          <div key={s._id} style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", padding: "8px 12px", background: "var(--surface-hover)", color: "var(--text-primary)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)" }}>
+                            <span style={{ fontWeight: 600 }}>{s.name}</span>
+                            <span style={{ fontSize: "11px", opacity: 0.8 }}>{s.email}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )
           )}
@@ -403,57 +450,87 @@ export default function StudentDashboard() {
 
             {/* ── Ask AI Tab ── */}
             {activeTab === "doubts" && (
-              <div style={{ maxWidth: 720 }}>
-                <section className="glass-card-static">
-                  <div className="section-header">
-                    <div className="section-icon cyan">🤖</div>
+              <div className="chatbot-container">
+                {/* Chat Header */}
+                <div className="chatbot-header">
+                  <div className="chatbot-header-info">
+                    <div className="section-icon cyan" style={{ width: 32, height: 32, fontSize: 16 }}>🤖</div>
                     <div>
-                      <h2>Ask a Doubt</h2>
-                      <p>AI answers from professor's course materials using RAG</p>
+                      <h3 style={{ fontSize: "var(--font-md)", fontWeight: 700, color: "var(--text-primary)" }}>AI Teaching Assistant</h3>
+                      <p style={{ fontSize: "var(--font-xs)", color: "var(--text-tertiary)" }}>Answers from course materials using RAG</p>
                     </div>
                   </div>
+                  <button className="btn-ghost btn-sm" onClick={loadChatHistory} title="Refresh history">↻</button>
+                </div>
 
-                  <form className="form-grid" onSubmit={askDoubt}>
-                    <div className="form-group">
-                      <label htmlFor="doubt-q">Your Question</label>
-                      <textarea
-                        id="doubt-q"
-                        rows={4}
-                        placeholder="Ask anything about the course material..."
-                        value={question}
-                        onChange={(e) => setQuestion(e.target.value)}
-                      />
-                    </div>
-
-                    <div className="form-actions">
-                      <button type="submit" className="btn-accent btn-full" disabled={aiThinking}>
-                        {aiThinking ? (
-                          <><span className="spinner"></span> AI is thinking...</>
-                        ) : (
-                          "🤖 Ask AI"
-                        )}
-                      </button>
-                    </div>
-                  </form>
-
-                  {doubtAnswer && (
-                    <div className="doubt-answer">
-                      <p>{doubtAnswer}</p>
-                      {doubtScore != null && (
-                        <div style={{ marginTop: "12px" }}>
-                          <span className="badge badge-accent">Quality Score: {doubtScore}</span>
-                        </div>
-                      )}
+                {/* Chat Messages */}
+                <div className="chatbot-messages" ref={chatContainerRef}>
+                  {chatMessages.length === 0 && !aiThinking && (
+                    <div className="chatbot-empty">
+                      <div style={{ fontSize: 48, marginBottom: 16 }}>🤖</div>
+                      <h3 style={{ color: "var(--text-primary)", marginBottom: 8 }}>Ask me anything about your course!</h3>
+                      <p style={{ color: "var(--text-tertiary)", fontSize: "var(--font-sm)" }}>I answer questions using only your professor's uploaded materials.</p>
                     </div>
                   )}
-                </section>
 
-                <div className="item-card mt-4">
-                  <p className="item-card-desc">
-                    💡 <strong>How it works:</strong> Your question is matched against the professor's uploaded
-                    materials using vector search (RAG). The AI only answers from course content, ensuring
-                    accurate and relevant responses.
-                  </p>
+                  {chatMessages.map((msg, i) => (
+                    <div key={i} className={`chat-bubble-row ${msg.role === "user" ? "chat-bubble-row-user" : "chat-bubble-row-ai"}`}>
+                      {msg.role === "ai" && (
+                        <div className="chat-avatar chat-avatar-ai">🤖</div>
+                      )}
+                      <div className={`chat-bubble ${msg.role === "user" ? "chat-bubble-user" : "chat-bubble-ai"}`}>
+                        <p className="chat-bubble-text">{msg.text}</p>
+                        <span className="chat-bubble-time">
+                          {new Date(msg.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      </div>
+                      {msg.role === "user" && (
+                        <div className="chat-avatar chat-avatar-user">{user?.name?.[0]?.toUpperCase() || "U"}</div>
+                      )}
+                    </div>
+                  ))}
+
+                  {aiThinking && (
+                    <div className="chat-bubble-row chat-bubble-row-ai">
+                      <div className="chat-avatar chat-avatar-ai">🤖</div>
+                      <div className="chat-bubble chat-bubble-ai chat-typing">
+                        <span className="typing-dot"></span>
+                        <span className="typing-dot"></span>
+                        <span className="typing-dot"></span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div ref={chatEndRef} />
+                </div>
+
+                {/* Chat Input */}
+                <div className="chatbot-input-bar">
+                  <textarea
+                    className="chatbot-input"
+                    placeholder="Ask anything about the course material..."
+                    value={question}
+                    onChange={(e) => setQuestion(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        askDoubt();
+                      }
+                    }}
+                    rows={1}
+                    disabled={aiThinking}
+                  />
+                  <button
+                    className="chatbot-send-btn"
+                    onClick={() => askDoubt()}
+                    disabled={aiThinking || !question.trim()}
+                    title="Send message"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="22" y1="2" x2="11" y2="13" />
+                      <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                    </svg>
+                  </button>
                 </div>
               </div>
             )}

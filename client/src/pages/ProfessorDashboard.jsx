@@ -42,6 +42,7 @@ export default function ProfessorDashboard() {
   /* ── Announcement State ── */
   const [announcementTitle, setAnnouncementTitle] = useState("");
   const [announcementMessage, setAnnouncementMessage] = useState("");
+  const [announcements, setAnnouncements] = useState([]);
 
   /* ── Analytics State ── */
   const [analytics, setAnalytics] = useState(null);
@@ -68,17 +69,21 @@ export default function ProfessorDashboard() {
   }, []);
 
   useEffect(() => {
-    if (activeTab === "courses") {
-      setSelectedCourse(null);
-      setCourseId("");
-    }
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (activeTab === "people" && courseId) {
-      loadStudents();
-    }
+    if (!courseId) return;
+    if (activeTab === "people" || activeTab === "courses") loadStudents();
+    else if (activeTab === "materials" || activeTab === "files") loadMaterials();
+    else if (activeTab === "announcements") loadAnnouncements();
+    else if (activeTab === "analytics") loadAnalytics();
   }, [activeTab, courseId]);
+
+  const loadAnnouncements = async () => {
+    try {
+      const { data } = await api.get(`/announcements/course/${courseId}`);
+      setAnnouncements(data.announcements || []);
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to load announcements", "error");
+    }
+  };
 
   const loadStudents = async () => {
     try {
@@ -282,7 +287,6 @@ export default function ProfessorDashboard() {
                         onClick={() => {
                           setSelectedCourse(c);
                           setCourseId(c.courseId);
-                          setActiveTab("materials");
                         }}
                         style={{ '--course-color': c.color || "var(--primary)" }}
                       >
@@ -298,13 +302,38 @@ export default function ProfessorDashboard() {
                           <h3 className="course-card-title">{c.name}</h3>
                           <p className="course-card-id">{c.courseId}</p>
                         </div>
-                        <div className="course-card-footer">
-                          <span className="course-card-students">👥 {c.students?.length || 0} enrolled students</span>
+                        <div className="course-card-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span className="course-card-students text-secondary text-sm">👥 {c.students?.length || 0} enrolled</span>
+                          <button className="btn-primary btn-sm" onClick={(e) => { e.stopPropagation(); setSelectedCourse(c); setCourseId(c.courseId); setActiveTab("materials"); }}>Manage Course →</button>
                         </div>
                       </div>
                     ))
                   )}
                 </div>
+
+                {selectedCourse && (
+                  <div className="glass-card-static mb-8">
+                    <div className="section-header" style={{ marginBottom: "16px" }}>
+                      <div className="section-icon indigo">👥</div>
+                      <div>
+                        <h2 className="text-xl">Enrolled Students • {selectedCourse.name}</h2>
+                        <p className="text-secondary text-sm">Students currently enrolled in the selected course</p>
+                      </div>
+                    </div>
+                    {enrolledStudents.length === 0 ? (
+                      <p className="empty-state-text">No students enrolled yet.</p>
+                    ) : (
+                      <div className="student-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "12px" }}>
+                        {enrolledStudents.map(s => (
+                          <div key={s._id} style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", padding: "8px 12px", background: "var(--surface-hover)", color: "var(--text-primary)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)" }}>
+                            <span style={{ fontWeight: 600 }}>{s.name}</span>
+                            <span style={{ fontSize: "11px", opacity: 0.8 }}>{s.email}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <section className="glass-card-static mt-8" style={{ maxWidth: 600 }}>
                   <div className="section-header">
@@ -403,8 +432,8 @@ export default function ProfessorDashboard() {
 
             {/* ── Materials Tab ── */}
             {activeTab === "materials" && (
-              <div className="content-grid two">
-                <section className="glass-card-static">
+              <div>
+                <section className="glass-card-static" style={{ maxWidth: 720 }}>
                   <div className="section-header">
                     <div className="section-icon indigo">📤</div>
                     <div>
@@ -453,43 +482,48 @@ export default function ProfessorDashboard() {
                   </form>
                 </section>
 
-                <section className="glass-card-static">
-                  <div className="section-header">
-                    <div className="section-icon cyan">📋</div>
-                    <div>
-                      <h2>Quick Actions</h2>
-                      <p>Common tasks for this course</p>
-                    </div>
-                  </div>
-
-                  <div className="form-grid" style={{ gap: "12px" }}>
-                    <button className="btn-secondary btn-full" onClick={loadMaterials}>
-                      📂 Load Uploaded Materials
-                    </button>
-                    <button className="btn-secondary btn-full" onClick={loadAnalytics}>
-                      📊 Load Course Analytics
-                    </button>
-                    <button className="btn-secondary btn-full" onClick={recomputeLeaderboard}>
-                      🏆 Recompute Leaderboard
-                    </button>
-                  </div>
-
-                  <div style={{ marginTop: "24px" }}>
+                {/* Uploaded Materials List */}
+                {materials.length > 0 && (
+                  <section className="glass-card-static mt-8">
                     <div className="section-header">
-                      <div className="section-icon green">💡</div>
+                      <div className="section-icon cyan">📂</div>
                       <div>
-                        <h2>How RAG Works</h2>
+                        <h2>Uploaded Materials</h2>
+                        <p>{materials.length} material{materials.length !== 1 ? "s" : ""} uploaded</p>
                       </div>
                     </div>
-                    <div className="item-card">
-                      <p className="item-card-desc">
-                        When you upload material text, it's automatically chunked and indexed into
-                        the ChromaDB vector database. Students can then ask doubts that are answered
-                        using only your course materials — ensuring accurate, contextual responses.
-                      </p>
+                    <div className="form-grid">
+                      {materials.map((m) => (
+                        <div key={m._id} className="item-card">
+                          <div className="item-card-header">
+                            <span className="item-card-title">{m.title}</span>
+                            <span className="badge badge-primary">{m.type}</span>
+                          </div>
+                          <p className="item-card-desc">{m.description || "No description"}</p>
+                          <div className="item-card-meta">
+                            {m.vectorized ? `✅ Indexed (${m.indexedChunks || 0} chunks)` : "⏳ Not indexed"} •{" "}
+                            {new Date(m.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}
+                          </div>
+                          {m.fileUrl && (
+                            <div className="item-card-actions">
+                              <a href={toPublicFileUrl(m.fileUrl)} target="_blank" rel="noreferrer" className="link-btn">
+                                📎 Open File
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                </section>
+                  </section>
+                )}
+
+                <div className="item-card mt-4" style={{ maxWidth: 720 }}>
+                  <p className="item-card-desc">
+                    💡 <strong>How RAG Works:</strong> When you upload material text, it's automatically chunked and indexed into
+                    the ChromaDB vector database. Students can then ask doubts that are answered
+                    using only your course materials — ensuring accurate, contextual responses.
+                  </p>
+                </div>
               </div>
             )}
 
@@ -544,8 +578,8 @@ export default function ProfessorDashboard() {
 
             {/* ── Announcements Tab ── */}
             {activeTab === "announcements" && (
-              <div style={{ maxWidth: 640 }}>
-                <section className="glass-card-static">
+              <div>
+                <section className="glass-card-static" style={{ maxWidth: 640 }}>
                   <div className="section-header">
                     <div className="section-icon amber">📢</div>
                     <div>
@@ -554,7 +588,7 @@ export default function ProfessorDashboard() {
                     </div>
                   </div>
 
-                  <form className="form-grid" onSubmit={postAnnouncement}>
+                  <form className="form-grid" onSubmit={async (e) => { await postAnnouncement(e); await loadAnnouncements(); }}>
                     <div className="form-group">
                       <label htmlFor="ann-title">Title</label>
                       <input id="ann-title" placeholder="e.g. Exam date changed" value={announcementTitle} onChange={(e) => setAnnouncementTitle(e.target.value)} required />
@@ -572,6 +606,47 @@ export default function ProfessorDashboard() {
                     </div>
                   </form>
                 </section>
+
+                {/* Past Announcements */}
+                <section className="glass-card-static mt-8">
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="section-header" style={{ marginBottom: 0 }}>
+                      <div className="section-icon amber">📋</div>
+                      <div>
+                        <h2>Past Announcements</h2>
+                        <p>{announcements.length} announcement{announcements.length !== 1 ? "s" : ""} posted</p>
+                      </div>
+                    </div>
+                    <button className="btn-secondary btn-sm" onClick={loadAnnouncements}>Refresh</button>
+                  </div>
+
+                  {announcements.length === 0 ? (
+                    <div className="empty-state">
+                      <div className="empty-state-icon">📢</div>
+                      <p className="empty-state-text">No announcements posted yet for this course.</p>
+                    </div>
+                  ) : (
+                    <div className="form-grid">
+                      {announcements.map((a) => (
+                        <div key={a._id} className="announcement-item">
+                          <div className="announcement-title">{a.title}</div>
+                          <div className="announcement-body">{a.message}</div>
+                          {a.createdAt && (
+                            <div className="announcement-date">
+                              {new Date(a.createdAt).toLocaleDateString(undefined, {
+                                day: "numeric",
+                                month: "long",
+                                year: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
               </div>
             )}
 
@@ -586,7 +661,7 @@ export default function ProfessorDashboard() {
                       <p>AI-generated insights about student performance</p>
                     </div>
                   </div>
-                  <button className="btn-primary" onClick={loadAnalytics}>Load Analytics</button>
+                  <button className="btn-secondary btn-sm" onClick={loadAnalytics}>Refresh</button>
                 </div>
 
                 {!analytics ? (

@@ -82,7 +82,7 @@ exports.getEnrolledCourses = async (req, res) => {
 
 exports.getProfessorCourses = async (req, res) => {
   try {
-    const courses = await Course.find({ professor: req.user._id });
+    const courses = await Course.find({ professor: req.user._id }).populate("students", "name email");
     res.status(200).json({ courses });
   } catch (error) {
     console.error("Get professor courses error:", error);
