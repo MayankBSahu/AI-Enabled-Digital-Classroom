@@ -166,18 +166,37 @@ export default function StudentDashboard() {
   };
 
   const groupedHistory = useMemo(() => {
+    // 1. Group single doubts into cohesive Threads
+    const threadsMap = {};
+    for (const doubt of allDoubts) {
+      const tId = doubt.sessionId || doubt._id;
+      if (!threadsMap[tId]) {
+        threadsMap[tId] = {
+           id: tId,
+           title: doubt.question, 
+           doubts: [],
+           createdAt: doubt.createdAt
+        };
+      }
+      threadsMap[tId].doubts.push(doubt);
+    }
+    
+    // Sort threads descending
+    const threads = Object.values(threadsMap).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    // 2. Group threads by Date Section
     const groups = {};
     const groupOrder = ["Today", "Yesterday", "Previous 7 Days", "Previous 30 Days", "Older"];
 
-    for (const doubt of allDoubts) {
-      const group = getDateGroup(doubt.createdAt);
+    for (const thread of threads) {
+      const group = getDateGroup(thread.createdAt);
       if (!groups[group]) groups[group] = [];
-      groups[group].push(doubt);
+      groups[group].push(thread);
     }
 
     return groupOrder
       .filter(g => groups[g]?.length)
-      .map(g => ({ label: g, doubts: groups[g] }));
+      .map(g => ({ label: g, threads: groups[g] }));
   }, [allDoubts]);
 
   const loadChatHistory = async () => {
@@ -193,17 +212,19 @@ export default function StudentDashboard() {
     }
   };
 
-  const selectConversation = (doubt) => {
-    setSelectedConversationId(doubt._id);
-    setChatMessages([
-      { role: "user", text: doubt.question, time: doubt.createdAt },
-      { role: "ai", text: doubt.answer, time: doubt.createdAt }
-    ]);
+  const selectConversation = (thread) => {
+    setSelectedConversationId(thread.id);
+    const msgs = [];
+    for (const doubt of thread.doubts) {
+      msgs.push({ role: "user", text: doubt.question, time: doubt.createdAt });
+      msgs.push({ role: "ai", text: doubt.answer, time: doubt.createdAt });
+    }
+    setChatMessages(msgs);
     setTimeout(() => chatContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" }), 50);
   };
 
   const startNewChat = () => {
-    setSelectedConversationId(null);
+    setSelectedConversationId(`session_${Date.now()}`); // Create a unique local session ID
     setChatMessages([]);
     setQuestion("");
   };
@@ -227,24 +248,28 @@ export default function StudentDashboard() {
     const userMsg = question.trim();
     setQuestion("");
 
-    // Always start a fresh message view when asking
-    setSelectedConversationId("pending");
-    setChatMessages([{ role: "user", text: userMsg, time: new Date().toISOString() }]);
+    // Determine the active session
+    let sessionId = selectedConversationId;
+    if (!sessionId || sessionId === "pending") {
+      sessionId = `session_${Date.now()}`;
+      setSelectedConversationId(sessionId);
+    }
+
+    setChatMessages((prev) => [...prev, { role: "user", text: userMsg, time: new Date().toISOString() }]);
 
     setAiThinking(true);
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
     try {
-      const { data } = await api.post("/doubts/ask", { courseId, question: userMsg });
+      const { data } = await api.post("/doubts/ask", { courseId, question: userMsg, sessionId });
       const doubt = data.doubt;
       const answer = doubt?.answer || "No answer generated.";
-      setChatMessages([
-        { role: "user", text: userMsg, time: doubt?.createdAt || new Date().toISOString() },
-        { role: "ai", text: answer, time: doubt?.createdAt || new Date().toISOString() }
-      ]);
-      // Add to allDoubts for sidebar and select it
+      
+      setChatMessages((prev) => [...prev, { role: "ai", text: answer, time: doubt?.createdAt || new Date().toISOString() }]);
+      
       if (doubt) {
         setAllDoubts((prev) => [...prev, doubt]);
-        setSelectedConversationId(doubt._id);
+        // Update selection explicitly in case of backend ID change
+        setSelectedConversationId(doubt.sessionId || doubt._id);
       }
     } catch (error) {
       setChatMessages((prev) => [...prev, { role: "ai", text: "Sorry, I encountered an error. Please try again.", time: new Date().toISOString() }]);
@@ -609,18 +634,18 @@ export default function StudentDashboard() {
                       groupedHistory.map((group) => (
                         <div key={group.label} className="chat-history-group">
                           <div className="chat-history-group-label">{group.label}</div>
-                          {group.doubts.map((doubt) => (
+                          {group.threads.map((thread) => (
                             <button
-                              key={doubt._id}
-                              className={`chat-history-item ${selectedConversationId === doubt._id ? "active" : ""}`}
-                              onClick={() => selectConversation(doubt)}
-                              title={doubt.question}
+                              key={thread.id}
+                              className={`chat-history-item ${selectedConversationId === thread.id ? "active" : ""}`}
+                              onClick={() => selectConversation(thread)}
+                              title={thread.title}
                             >
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="chat-history-item-icon">
                                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                               </svg>
                               <span className="chat-history-item-text">
-                                {doubt.question.length > 34 ? doubt.question.slice(0, 34) + "…" : doubt.question}
+                                {thread.title}
                               </span>
                             </button>
                           ))}
