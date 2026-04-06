@@ -62,6 +62,16 @@ export default function ProfessorDashboard() {
   const [editingScoreId, setEditingScoreId] = useState(null);
   const [editingScoreValue, setEditingScoreValue] = useState("");
 
+  /* ── Announcement Editing State ── */
+  const [editingAnnouncementId, setEditingAnnouncementId] = useState(null);
+  const [editAnnTitle, setEditAnnTitle] = useState("");
+  const [editAnnMessage, setEditAnnMessage] = useState("");
+
+  /* ── Announcement Comments State ── */
+  const [openCommentsId, setOpenCommentsId] = useState(null);
+  const [comments, setComments] = useState([]);
+  const [newComment, setNewComment] = useState("");
+
   const [question, setQuestion] = useState("");
   const [chatMessages, setChatMessages] = useState([]);
   const [allDoubts, setAllDoubts] = useState([]);
@@ -255,6 +265,54 @@ export default function ProfessorDashboard() {
       addToast(error.response?.data?.message || "Failed to post announcement", "error");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const deleteAnnouncement = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this announcement?")) return;
+    try {
+      await api.delete(`/announcements/${id}`);
+      addToast("Announcement deleted", "success");
+      await loadAnnouncements();
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to delete announcement", "error");
+    }
+  };
+
+  const saveEditAnnouncement = async (id) => {
+    try {
+      await api.put(`/announcements/${id}`, { title: editAnnTitle, message: editAnnMessage });
+      addToast("Announcement updated", "success");
+      setEditingAnnouncementId(null);
+      await loadAnnouncements();
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to update announcement", "error");
+    }
+  };
+
+  const toggleComments = async (announcementId) => {
+    if (openCommentsId === announcementId) {
+      setOpenCommentsId(null);
+      return;
+    }
+    setOpenCommentsId(announcementId);
+    try {
+      const { data } = await api.get(`/announcements/${announcementId}/comments`);
+      setComments(data.comments || []);
+    } catch (error) {
+      setComments([]);
+    }
+  };
+
+  const postComment = async (announcementId) => {
+    if (!newComment.trim()) return;
+    try {
+      await api.post(`/announcements/${announcementId}/comments`, { text: newComment });
+      setNewComment("");
+      const { data } = await api.get(`/announcements/${announcementId}/comments`);
+      setComments(data.comments || []);
+    } catch (error) {
+      addToast("Failed to post comment", "error");
     }
   };
 
@@ -985,19 +1043,84 @@ export default function ProfessorDashboard() {
                     <div className="form-grid">
                       {announcements.map((a) => (
                         <div key={a._id} className="announcement-item">
-                          <div className="announcement-title">{a.title}</div>
-                          <div className="announcement-body">{a.message}</div>
-                          {a.createdAt && (
-                            <div className="announcement-date">
-                              {new Date(a.createdAt).toLocaleDateString(undefined, {
-                                day: "numeric",
-                                month: "long",
-                                year: "numeric",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
+                          {editingAnnouncementId === a._id ? (
+                            <div>
+                              <div className="form-group" style={{ marginBottom: "var(--space-3)" }}>
+                                <input value={editAnnTitle} onChange={(e) => setEditAnnTitle(e.target.value)} style={{ width: "100%" }} />
+                              </div>
+                              <div className="form-group" style={{ marginBottom: "var(--space-3)" }}>
+                                <textarea rows={3} value={editAnnMessage} onChange={(e) => setEditAnnMessage(e.target.value)} style={{ width: "100%" }} />
+                              </div>
+                              <div style={{ display: "flex", gap: "8px" }}>
+                                <button className="btn-primary btn-sm" onClick={() => saveEditAnnouncement(a._id)}>Save</button>
+                                <button className="btn-ghost btn-sm" onClick={() => setEditingAnnouncementId(null)}>Cancel</button>
+                              </div>
                             </div>
+                          ) : (
+                            <>
+                              <div className="announcement-title">{a.title}</div>
+                              <div className="announcement-body">{a.message}</div>
+                              {a.createdAt && (
+                                <div className="announcement-date">
+                                  {new Date(a.createdAt).toLocaleDateString(undefined, {
+                                    day: "numeric",
+                                    month: "long",
+                                    year: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                </div>
+                              )}
+                              <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
+                                <button className="btn-secondary btn-sm" onClick={() => { setEditingAnnouncementId(a._id); setEditAnnTitle(a.title); setEditAnnMessage(a.message); }}>✎ Edit</button>
+                                <button className="btn-ghost btn-sm" style={{ color: "var(--error, #ef4444)" }} onClick={() => deleteAnnouncement(a._id)}>🗑 Delete</button>
+                              </div>
+                            </>
                           )}
+
+                          {/* ── Comments Section ── */}
+                          <div style={{ marginTop: "16px", borderTop: "1px solid var(--border)", paddingTop: "12px" }}>
+                            <button 
+                              className="btn-ghost btn-sm" 
+                              style={{ padding: "4px 0", fontSize: "13px" }}
+                              onClick={() => toggleComments(a._id)}
+                            >
+                              💬 {openCommentsId === a._id ? "Hide Comments" : "View Comments"}
+                            </button>
+
+                            {openCommentsId === a._id && (
+                              <div style={{ marginTop: "12px" }}>
+                                {comments.length === 0 ? (
+                                  <p className="text-secondary text-sm" style={{ marginBottom: "8px" }}>No student comments yet.</p>
+                                ) : (
+                                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "12px", maxHeight: "240px", overflowY: "auto" }}>
+                                    {comments.map((c) => (
+                                      <div key={c._id} style={{ background: "var(--surface-hover)", padding: "8px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                            <span style={{ fontWeight: 600, fontSize: "12px", color: "var(--text-primary)" }}>{c.userId?.name || "User"}</span>
+                                            {c.userId?.role && <span className="badge badge-primary" style={{ fontSize: "10px", padding: "1px 6px" }}>{c.userId.role}</span>}
+                                          </div>
+                                          <span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>{new Date(c.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                                        </div>
+                                        <p style={{ margin: 0, fontSize: "13px", color: "var(--text-secondary)" }}>{c.text}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                <div style={{ display: "flex", gap: "8px" }}>
+                                  <input 
+                                    placeholder="Reply to students..." 
+                                    value={newComment} 
+                                    onChange={(e) => setNewComment(e.target.value)} 
+                                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); postComment(a._id); } }}
+                                    style={{ flex: 1, padding: "8px 12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "13px" }} 
+                                  />
+                                  <button className="btn-primary btn-sm" onClick={() => postComment(a._id)}>Reply</button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>

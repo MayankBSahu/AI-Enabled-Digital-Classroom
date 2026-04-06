@@ -50,6 +50,11 @@ export default function StudentDashboard() {
   const [hasNewAnnouncements, setHasNewAnnouncements] = useState(false);
   const [materials, setMaterials] = useState([]);
 
+  /* ── Announcement Comments ── */
+  const [openCommentsId, setOpenCommentsId] = useState(null);
+  const [comments, setComments] = useState([]);
+  const [newComment, setNewComment] = useState("");
+
   /* ── Loading ── */
   const [submitting, setSubmitting] = useState(false);
   const [aiThinking, setAiThinking] = useState(false);
@@ -323,6 +328,32 @@ export default function StudentDashboard() {
       setMaterials(data.materials || []);
     } catch (error) {
       addToast(error.response?.data?.message || "Failed to load materials", "error");
+    }
+  };
+
+  const toggleComments = async (announcementId) => {
+    if (openCommentsId === announcementId) {
+      setOpenCommentsId(null);
+      return;
+    }
+    setOpenCommentsId(announcementId);
+    try {
+      const { data } = await api.get(`/announcements/${announcementId}/comments`);
+      setComments(data.comments || []);
+    } catch (error) {
+      setComments([]);
+    }
+  };
+
+  const postComment = async (announcementId) => {
+    if (!newComment.trim()) return;
+    try {
+      await api.post(`/announcements/${announcementId}/comments`, { text: newComment });
+      setNewComment("");
+      const { data } = await api.get(`/announcements/${announcementId}/comments`);
+      setComments(data.comments || []);
+    } catch (error) {
+      addToast("Failed to post comment", "error");
     }
   };
 
@@ -913,6 +944,47 @@ export default function StudentDashboard() {
                                <button className="btn-primary btn-sm" style={{ background: "var(--primary)" }}>Go to {a.type === 'project' ? 'Project' : 'Assignment'} →</button>
                              </div>
                           )}
+
+                          {/* ── Comments Section ── */}
+                          <div style={{ marginTop: "16px", borderTop: "1px solid var(--border)", paddingTop: "12px" }}>
+                            <button 
+                              className="btn-ghost btn-sm" 
+                              style={{ padding: "4px 0", fontSize: "13px" }}
+                              onClick={(e) => { e.stopPropagation(); toggleComments(a._id); }}
+                            >
+                              💬 {openCommentsId === a._id ? "Hide Comments" : "Comments"}
+                            </button>
+
+                            {openCommentsId === a._id && (
+                              <div style={{ marginTop: "12px" }} onClick={(e) => e.stopPropagation()}>
+                                {comments.length === 0 ? (
+                                  <p className="text-secondary text-sm" style={{ marginBottom: "8px" }}>No comments yet. Be the first!</p>
+                                ) : (
+                                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "12px", maxHeight: "200px", overflowY: "auto" }}>
+                                    {comments.map((c) => (
+                                      <div key={c._id} style={{ background: "var(--surface-hover)", padding: "8px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                                          <span style={{ fontWeight: 600, fontSize: "12px", color: "var(--text-primary)" }}>{c.userId?.name || "User"}</span>
+                                          <span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>{new Date(c.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                                        </div>
+                                        <p style={{ margin: 0, fontSize: "13px", color: "var(--text-secondary)" }}>{c.text}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                <div style={{ display: "flex", gap: "8px" }}>
+                                  <input 
+                                    placeholder="Write a comment..." 
+                                    value={newComment} 
+                                    onChange={(e) => setNewComment(e.target.value)} 
+                                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); postComment(a._id); } }}
+                                    style={{ flex: 1, padding: "8px 12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "13px" }} 
+                                  />
+                                  <button className="btn-primary btn-sm" onClick={() => postComment(a._id)}>Post</button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       );
                     })}

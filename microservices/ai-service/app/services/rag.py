@@ -61,6 +61,21 @@ def ingest_material(course_id: str, material_id: str, title: str, text: str) -> 
             }
         )
 
+    # Also upsert a dedicated title-only chunk so title searches always find this material
+    title_chunk_id = f"{course_id}:{material_id}:title"
+    title_doc = f"Material Title: {title}. This chunk represents the material titled \"{title}\". Any questions about {title} should reference this material."
+    _collection.upsert(
+        ids=[title_chunk_id],
+        documents=[title_doc],
+        embeddings=[cheap_embedding(title_doc)],
+        metadatas=[{
+            "course_id": course_id,
+            "material_id": material_id,
+            "chunk_id": "title",
+            "title": title or ""
+        }]
+    )
+
     _collection.upsert(ids=ids, documents=docs, embeddings=embeddings, metadatas=metadatas)
     return {"indexed_chunks": len(ids)}
 
@@ -96,9 +111,14 @@ def retrieve_context(course_id: str, question: str, top_k: int = 10) -> List[Dic
         # Convert to similarity: 1.0 = identical, -1.0 = opposite
         cosine_sim = 1.0 - float(distance) if distance is not None else 0.0
 
-        # Keyword boost: add up to 0.35 for keyword overlap
+        # Keyword boost: add up to 0.35 for keyword overlap in chunk text
         kw_boost = _keyword_overlap_score(query_keywords, doc.lower()) * 0.35
-        combined_score = min(1.0, cosine_sim + kw_boost)
+
+        # Title boost: add up to 0.25 for keyword overlap with the material title
+        title_text = (meta.get('title') or '').lower()
+        title_boost = _keyword_overlap_score(query_keywords, title_text) * 0.25
+
+        combined_score = min(1.0, cosine_sim + kw_boost + title_boost)
 
         rows.append({"text": doc, "meta": meta, "score": combined_score})
 
