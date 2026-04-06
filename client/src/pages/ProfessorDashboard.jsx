@@ -72,6 +72,16 @@ export default function ProfessorDashboard() {
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState("");
 
+  /* ── Assignment Editing State ── */
+  const [editingAssignmentId, setEditingAssignmentId] = useState(null);
+  const [editAsgnTitle, setEditAsgnTitle] = useState("");
+  const [editAsgnDesc, setEditAsgnDesc] = useState("");
+
+  /* ── Material Editing State ── */
+  const [editingMaterialId, setEditingMaterialId] = useState(null);
+  const [editMatTitle, setEditMatTitle] = useState("");
+  const [editMatDesc, setEditMatDesc] = useState("");
+
   const [question, setQuestion] = useState("");
   const [chatMessages, setChatMessages] = useState([]);
   const [allDoubts, setAllDoubts] = useState([]);
@@ -246,6 +256,51 @@ export default function ProfessorDashboard() {
       addToast(error.response?.data?.message || "Failed to create assignment", "error");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const deleteAssignment = async (id) => {
+    if (!window.confirm("Delete this assignment and all its submissions?")) return;
+    try {
+      await api.delete(`/assignments/${id}`);
+      addToast("Assignment deleted", "success");
+      setSelectedViewAssignment(null);
+      await loadAssignments();
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to delete assignment", "error");
+    }
+  };
+
+  const saveEditAssignment = async (id) => {
+    try {
+      await api.put(`/assignments/${id}`, { title: editAsgnTitle, description: editAsgnDesc });
+      addToast("Assignment updated", "success");
+      setEditingAssignmentId(null);
+      await loadAssignments();
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to update assignment", "error");
+    }
+  };
+
+  const deleteMaterial = async (id) => {
+    if (!window.confirm("Delete this material permanently?")) return;
+    try {
+      await api.delete(`/materials/${id}`);
+      addToast("Material deleted", "success");
+      await loadMaterials();
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to delete material", "error");
+    }
+  };
+
+  const saveEditMaterial = async (id) => {
+    try {
+      await api.put(`/materials/${id}`, { title: editMatTitle, description: editMatDesc });
+      addToast("Material updated", "success");
+      setEditingMaterialId(null);
+      await loadMaterials();
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to update material", "error");
     }
   };
 
@@ -743,21 +798,40 @@ export default function ProfessorDashboard() {
                     <div className="form-grid">
                       {materials.map((m) => (
                         <div key={m._id} className="item-card">
-                          <div className="item-card-header">
-                            <span className="item-card-title">{m.title}</span>
-                            <span className="badge badge-primary">{m.type}</span>
-                          </div>
-                          <p className="item-card-desc">{m.description || "No description"}</p>
-                          <div className="item-card-meta">
-                            {m.vectorized ? `✅ Indexed (${m.indexedChunks || 0} chunks)` : "⏳ Not indexed"} •{" "}
-                            {new Date(m.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}
-                          </div>
-                          {m.fileUrl && (
-                            <div className="item-card-actions">
-                              <a href={toPublicFileUrl(m.fileUrl)} target="_blank" rel="noreferrer" className="link-btn">
-                                📎 Open File
-                              </a>
+                          {editingMaterialId === m._id ? (
+                            <div>
+                              <div className="form-group" style={{ marginBottom: "var(--space-3)" }}>
+                                <input value={editMatTitle} onChange={(e) => setEditMatTitle(e.target.value)} style={{ width: "100%" }} placeholder="Title" />
+                              </div>
+                              <div className="form-group" style={{ marginBottom: "var(--space-3)" }}>
+                                <textarea rows={2} value={editMatDesc} onChange={(e) => setEditMatDesc(e.target.value)} style={{ width: "100%" }} placeholder="Description" />
+                              </div>
+                              <div style={{ display: "flex", gap: "8px" }}>
+                                <button className="btn-primary btn-sm" onClick={() => saveEditMaterial(m._id)}>Save</button>
+                                <button className="btn-ghost btn-sm" onClick={() => setEditingMaterialId(null)}>Cancel</button>
+                              </div>
                             </div>
+                          ) : (
+                            <>
+                              <div className="item-card-header">
+                                <span className="item-card-title">{m.title}</span>
+                                <span className="badge badge-primary">{m.type}</span>
+                              </div>
+                              <p className="item-card-desc">{m.description || "No description"}</p>
+                              <div className="item-card-meta">
+                                {m.vectorized ? `✅ Indexed (${m.indexedChunks || 0} chunks)` : "⏳ Not indexed"} •{" "}
+                                {new Date(m.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}
+                              </div>
+                              <div style={{ display: "flex", gap: "8px", marginTop: "var(--space-3)", alignItems: "center" }}>
+                                {m.fileUrl && (
+                                  <a href={toPublicFileUrl(m.fileUrl)} target="_blank" rel="noreferrer" className="link-btn" style={{ fontSize: "var(--font-sm)" }}>
+                                    📎 Open File
+                                  </a>
+                                )}
+                                <button className="btn-secondary btn-sm" onClick={() => { setEditingMaterialId(m._id); setEditMatTitle(m.title); setEditMatDesc(m.description || ""); }}>✎ Edit</button>
+                                <button className="btn-ghost btn-sm" style={{ color: "var(--error, #ef4444)" }} onClick={() => deleteMaterial(m._id)}>🗑 Delete</button>
+                              </div>
+                            </>
                           )}
                         </div>
                       ))}
@@ -897,23 +971,42 @@ export default function ProfessorDashboard() {
                     <div className="form-grid">
                       {assignments.map((a) => (
                         <div key={a._id} className="item-card">
-                          <div className="item-card-header">
-                            <span className="item-card-title">{a.title}</span>
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                              {a.isProject && <span className="badge badge-accent">Project</span>}
-                              <span className="badge badge-primary">{a.maxMarks} marks</span>
+                          {editingAssignmentId === a._id ? (
+                            <div>
+                              <div className="form-group" style={{ marginBottom: "var(--space-3)" }}>
+                                <input value={editAsgnTitle} onChange={(e) => setEditAsgnTitle(e.target.value)} style={{ width: "100%" }} placeholder="Title" />
+                              </div>
+                              <div className="form-group" style={{ marginBottom: "var(--space-3)" }}>
+                                <textarea rows={2} value={editAsgnDesc} onChange={(e) => setEditAsgnDesc(e.target.value)} style={{ width: "100%" }} placeholder="Description" />
+                              </div>
+                              <div style={{ display: "flex", gap: "8px" }}>
+                                <button className="btn-primary btn-sm" onClick={() => saveEditAssignment(a._id)}>Save</button>
+                                <button className="btn-ghost btn-sm" onClick={() => setEditingAssignmentId(null)}>Cancel</button>
+                              </div>
                             </div>
-                          </div>
-                          {a.description && <p className="item-card-desc">{a.description}</p>}
-                          <div className="item-card-meta">
-                            Due: {new Date(a.dueDate).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
-                            {a.rubric?.length > 0 && ` • Rubric: ${a.rubric.join(", ")}`}
-                          </div>
-                          <div className="item-card-actions" style={{ marginTop: "var(--space-3)" }}>
-                            <button className="btn-secondary btn-sm" onClick={() => { setSelectedViewAssignment(selectedViewAssignment?._id === a._id ? null : a); loadSubmissions(a._id); }}>
-                              {selectedViewAssignment?._id === a._id ? "▲ Hide Submissions" : "▼ View Submissions"}
-                            </button>
-                          </div>
+                          ) : (
+                            <>
+                              <div className="item-card-header">
+                                <span className="item-card-title">{a.title}</span>
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                  {a.isProject && <span className="badge badge-accent">Project</span>}
+                                  <span className="badge badge-primary">{a.maxMarks} marks</span>
+                                </div>
+                              </div>
+                              {a.description && <p className="item-card-desc">{a.description}</p>}
+                              <div className="item-card-meta">
+                                Due: {new Date(a.dueDate).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                {a.rubric?.length > 0 && ` • Rubric: ${a.rubric.join(", ")}`}
+                              </div>
+                              <div className="item-card-actions" style={{ marginTop: "var(--space-3)", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                                <button className="btn-secondary btn-sm" onClick={() => { setSelectedViewAssignment(selectedViewAssignment?._id === a._id ? null : a); loadSubmissions(a._id); }}>
+                                  {selectedViewAssignment?._id === a._id ? "▲ Hide Submissions" : "▼ View Submissions"}
+                                </button>
+                                <button className="btn-secondary btn-sm" onClick={() => { setEditingAssignmentId(a._id); setEditAsgnTitle(a.title); setEditAsgnDesc(a.description || ""); }}>✎ Edit</button>
+                                <button className="btn-ghost btn-sm" style={{ color: "var(--error, #ef4444)" }} onClick={() => deleteAssignment(a._id)}>🗑 Delete</button>
+                              </div>
+                            </>
+                          )}
 
                           {selectedViewAssignment?._id === a._id && (
                             <div style={{ marginTop: "var(--space-4)", borderTop: "1px solid var(--border)", paddingTop: "var(--space-4)" }}>

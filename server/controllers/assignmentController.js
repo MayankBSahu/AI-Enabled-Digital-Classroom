@@ -1,5 +1,6 @@
 const Assignment = require("../models/Assignment");
 const Announcement = require("../models/Announcement");
+const Submission = require("../models/Submission");
 
 const createAssignment = async (req, res) => {
   const { courseId, title, description, rubric, maxMarks, dueDate, isProject } = req.body;
@@ -42,7 +43,50 @@ const listAssignmentsByCourse = async (req, res) => {
   return res.json({ assignments });
 };
 
+const updateAssignment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, description, rubric, maxMarks, dueDate, isProject } = req.body;
+
+    const assignment = await Assignment.findById(id);
+    if (!assignment) {
+      return res.status(404).json({ message: "Assignment not found" });
+    }
+
+    if (title !== undefined) assignment.title = title;
+    if (description !== undefined) assignment.description = description;
+    if (rubric !== undefined) assignment.rubric = Array.isArray(rubric) ? rubric : [];
+    if (maxMarks !== undefined) assignment.maxMarks = maxMarks;
+    if (dueDate !== undefined) assignment.dueDate = dueDate;
+    if (isProject !== undefined) assignment.isProject = !!isProject;
+    await assignment.save();
+
+    return res.json({ assignment });
+  } catch (error) {
+    console.error("Update assignment error:", error.message);
+    return res.status(500).json({ message: "Failed to update assignment" });
+  }
+};
+
+const deleteAssignment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const assignment = await Assignment.findByIdAndDelete(id);
+    if (!assignment) {
+      return res.status(404).json({ message: "Assignment not found" });
+    }
+    // Delete associated submissions
+    await Submission.deleteMany({ assignmentId: id });
+    return res.json({ message: "Assignment deleted" });
+  } catch (error) {
+    console.error("Delete assignment error:", error.message);
+    return res.status(500).json({ message: "Failed to delete assignment" });
+  }
+};
+
 module.exports = {
   createAssignment,
-  listAssignmentsByCourse
+  listAssignmentsByCourse,
+  updateAssignment,
+  deleteAssignment
 };
