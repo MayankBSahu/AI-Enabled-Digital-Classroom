@@ -72,7 +72,8 @@ exports.getEnrolledCourses = async (req, res) => {
   try {
     const courses = await Course.find({ students: req.user._id })
       .populate("professor", "name email")
-      .select("-students"); // hide student list from general fetch
+      .select("-students")
+      .sort({ createdAt: -1 });
     res.status(200).json({ courses });
   } catch (error) {
     console.error("Get student courses error:", error);
@@ -82,7 +83,7 @@ exports.getEnrolledCourses = async (req, res) => {
 
 exports.getProfessorCourses = async (req, res) => {
   try {
-    const courses = await Course.find({ professor: req.user._id }).populate("students", "name email");
+    const courses = await Course.find({ professor: req.user._id }).populate("students", "name email").sort({ createdAt: -1 });
     res.status(200).json({ courses });
   } catch (error) {
     console.error("Get professor courses error:", error);

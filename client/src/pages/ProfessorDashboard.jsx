@@ -752,8 +752,6 @@ export default function ProfessorDashboard() {
                         <select id="mat-type" value={materialType} onChange={(e) => setMaterialType(e.target.value)}>
                           <option value="slide">Slide</option>
                           <option value="note">Note</option>
-                          <option value="assignment">Assignment</option>
-                          <option value="project-topic">Project Topic</option>
                         </select>
                       </div>
                       <div className="form-group">

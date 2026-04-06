@@ -39,7 +39,7 @@ const createAssignment = async (req, res) => {
 
 const listAssignmentsByCourse = async (req, res) => {
   const { courseId } = req.params;
-  const assignments = await Assignment.find({ courseId }).sort({ dueDate: 1 });
+  const assignments = await Assignment.find({ courseId }).sort({ createdAt: -1 });
   return res.json({ assignments });
 };
 
