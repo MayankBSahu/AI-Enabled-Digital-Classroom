@@ -6,6 +6,7 @@ class EvalRequest(BaseModel):
     submission_id: str
     file_url: str = ""
     submission_text: str = ""
+    description: str = ""
     rubric: List[str] = []
     max_marks: int = 100
     model_answer: Optional[str] = ""

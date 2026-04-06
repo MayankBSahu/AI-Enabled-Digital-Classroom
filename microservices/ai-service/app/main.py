@@ -40,7 +40,7 @@ async def ingest(payload: IngestRequest) -> Dict[str, Any]:
 
 @app.post("/evaluate-assignment", response_model=EvalResponse)
 async def evaluate_assignment(payload: EvalRequest) -> Dict[str, Any]:
-    return evaluate_submission(payload)
+    return await evaluate_submission(payload)
 
 
 SYSTEM_PROMPT_TEMPLATE = """You are an expert AI Teaching Assistant for a university digital classroom.

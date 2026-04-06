@@ -1,5 +1,7 @@
 const Assignment = require("../models/Assignment");
 const Submission = require("../models/Submission");
+const fs = require("fs");
+const pdfParse = require("pdf-parse");
 const { resolveFileUrl } = require("../utils/storage");
 const { evaluateAssignment } = require("../utils/aiClient");
 
@@ -17,6 +19,17 @@ const uploadSubmission = async (req, res) => {
   }
 
   const fileUrl = resolveFileUrl(req.file.filename);
+
+  let finalSubmissionText = submissionText;
+  if (!finalSubmissionText && req.file && req.file.mimetype === "application/pdf") {
+    try {
+      const dataBuffer = fs.readFileSync(req.file.path);
+      const data = await pdfParse(dataBuffer);
+      finalSubmissionText = data.text;
+    } catch (e) {
+      console.error("Failed to parse PDF document:", e);
+    }
+  }
 
   const submission = await Submission.findOneAndUpdate(
     { assignmentId, studentId: req.user._id },
@@ -40,7 +53,8 @@ const uploadSubmission = async (req, res) => {
     const aiResult = await evaluateAssignment({
       submission_id: submission._id.toString(),
       file_url: fileUrl,
-      submission_text: submissionText,
+      submission_text: finalSubmissionText,
+      description: assignment.description || "",
       rubric: assignment.rubric,
       max_marks: assignment.maxMarks,
       model_answer: ""
