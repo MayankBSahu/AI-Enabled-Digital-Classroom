@@ -47,6 +47,7 @@ export default function StudentDashboard() {
   /* ── Lists ── */
   const [leaderboard, setLeaderboard] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
+  const [hasNewAnnouncements, setHasNewAnnouncements] = useState(false);
   const [materials, setMaterials] = useState([]);
 
   /* ── Loading ── */
@@ -67,14 +68,24 @@ export default function StudentDashboard() {
   }, []);
 
   useEffect(() => {
+    if (courseId) {
+       loadAnnouncements(true);
+    }
+  }, [courseId]);
+
+  useEffect(() => {
     if (!courseId) return;
     if (activeTab === "people" || activeTab === "courses") loadStudents();
-    else if (activeTab === "announcements") loadAnnouncements();
     else if (activeTab === "materials" || activeTab === "files") loadMaterials();
     else if (activeTab === "leaderboard") loadLeaderboard();
     else if (activeTab === "doubts") loadChatHistory();
-    else if (activeTab === "submit") { loadAssignments(); loadMySubmissions(); }
-  }, [activeTab, courseId]);
+    else if (activeTab === "assignments") { loadAssignments(); loadMySubmissions(); }
+
+    if (activeTab === "announcements" && hasNewAnnouncements) {
+      setHasNewAnnouncements(false);
+      localStorage.setItem(`last_announcement_view_${courseId}`, Date.now().toString());
+    }
+  }, [activeTab, courseId, hasNewAnnouncements]);
 
   const loadStudents = async () => {
     try {
@@ -289,12 +300,20 @@ export default function StudentDashboard() {
     }
   };
 
-  const loadAnnouncements = async () => {
+  const loadAnnouncements = async (background = false) => {
     try {
       const { data } = await api.get(`/announcements/course/${courseId}`);
-      setAnnouncements(data.announcements || []);
+      const fetched = data.announcements || [];
+      setAnnouncements(fetched);
+      if (background && fetched.length > 0) {
+         const lastViewed = localStorage.getItem(`last_announcement_view_${courseId}`);
+         if (!lastViewed || new Date(fetched[0].createdAt).getTime() > parseInt(lastViewed, 10)) {
+            setHasNewAnnouncements(true);
+            addToast(`You have ${fetched.length} course announcements to review.`, "info");
+         }
+      }
     } catch (error) {
-      addToast(error.response?.data?.message || "Failed to load announcements", "error");
+      if (!background) addToast(error.response?.data?.message || "Failed to load announcements", "error");
     }
   };
 
@@ -389,7 +408,7 @@ export default function StudentDashboard() {
                         </div>
                         <div className="course-card-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <span className="course-card-students text-secondary text-sm">Select to view students</span>
-                          <button className="btn-primary btn-sm" onClick={(e) => { e.stopPropagation(); setSelectedCourse(c); setCourseId(c.courseId); setActiveTab("submit"); }}>View Dashboard →</button>
+                          <button className="btn-primary btn-sm" onClick={(e) => { e.stopPropagation(); setSelectedCourse(c); setCourseId(c.courseId); setActiveTab("assignments"); }}>View Dashboard →</button>
                         </div>
                       </div>
                     ))
@@ -473,8 +492,8 @@ export default function StudentDashboard() {
               </div>
             )}
 
-            {/* ── Submit Work Tab ── */}
-            {activeTab === "submit" && (
+            {/* ── Assignments Tab ── */}
+            {activeTab === "assignments" && (
               <div style={{ maxWidth: 640 }}>
                 <section className="glass-card-static">
                   <div className="section-header">
@@ -484,6 +503,15 @@ export default function StudentDashboard() {
                       <p>Upload your work for AI-powered evaluation</p>
                     </div>
                   </div>
+
+                  {announcements.find(a => a.type === 'assignment' || a.type === 'project') && (
+                    <div className="item-card mb-6" style={{ borderLeft: "4px solid var(--primary-light)", background: "var(--surface-hover)", cursor: "pointer" }} onClick={() => setSelectedAssignmentId(announcements.find(a => a.type === 'assignment' || a.type === 'project').referenceId || "")}>
+                      <div className="item-card-header">
+                        <span className="item-card-title text-primary-light">🚀 Latest Requirement: {announcements.find(a => a.type === 'assignment' || a.type === 'project').title}</span>
+                      </div>
+                      <p className="item-card-desc" style={{ marginTop: "var(--space-2)" }}>{announcements.find(a => a.type === 'assignment' || a.type === 'project').message}</p>
+                    </div>
+                  )}
 
                   <form className="form-grid" onSubmit={submitAssignment}>
                     <div className="form-group">
@@ -498,7 +526,7 @@ export default function StudentDashboard() {
                         </option>
                         {assignments.map((a) => (
                           <option key={a._id} value={a._id}>
-                            {a.title} {a.maxMarks ? `(${a.maxMarks} marks)` : ""}
+                            {a.isProject ? "[Project] " : ""}{a.title} {a.maxMarks ? `(${a.maxMarks} marks)` : ""}
                           </option>
                         ))}
                       </select>
@@ -558,9 +586,12 @@ export default function StudentDashboard() {
                         <div key={s._id} className="item-card">
                           <div className="item-card-header">
                             <span className="item-card-title">{s.assignmentId?.title || "Assignment"}</span>
-                            <span className={`badge ${s.status === "evaluated" ? "badge-accent" : s.status === "error" ? "badge-warning" : "badge-primary"}`}>
-                              {s.status}
-                            </span>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              {s.assignmentId?.isProject && <span className="badge badge-accent">Project</span>}
+                              <span className={`badge ${s.status === "evaluated" ? "badge-accent" : s.status === "error" ? "badge-warning" : "badge-primary"}`}>
+                                {s.status}
+                              </span>
+                            </div>
                           </div>
                           {s.aiResult && s.status === "evaluated" && (
                             <div style={{ marginTop: "var(--space-3)" }}>
@@ -848,23 +879,43 @@ export default function StudentDashboard() {
                   </div>
                 ) : (
                   <div className="form-grid">
-                    {announcements.map((a) => (
-                      <div key={a._id} className="announcement-item">
-                        <div className="announcement-title">{a.title}</div>
-                        <div className="announcement-body">{a.message}</div>
-                        {a.createdAt && (
-                          <div className="announcement-date">
-                            {new Date(a.createdAt).toLocaleDateString(undefined, {
-                              day: "numeric",
-                              month: "long",
-                              year: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
+                    {announcements.map((a) => {
+                      const isTask = a.type === "assignment" || a.type === "project";
+                      return (
+                        <div 
+                          key={a._id} 
+                          className={`announcement-item ${isTask ? 'premium-banner' : ''}`}
+                          style={isTask ? { border: "1px solid var(--primary-light)", background: "linear-gradient(145deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.05))", cursor: "pointer", transition: "transform 0.2s" } : {}}
+                          onClick={() => {
+                            if (isTask) {
+                              setActiveTab("assignments");
+                              if (a.referenceId) setSelectedAssignmentId(a.referenceId);
+                            }
+                          }}
+                        >
+                          <div className="announcement-title" style={isTask ? { color: "var(--primary-light)" } : {}}>
+                            {isTask && "🔥 "}{a.title}
                           </div>
-                        )}
-                      </div>
-                    ))}
+                          <div className="announcement-body">{a.message}</div>
+                          {a.createdAt && (
+                            <div className="announcement-date text-secondary mt-3">
+                              {new Date(a.createdAt).toLocaleDateString(undefined, {
+                                day: "numeric",
+                                month: "long",
+                                year: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </div>
+                          )}
+                          {isTask && (
+                             <div style={{ marginTop: "16px" }}>
+                               <button className="btn-primary btn-sm" style={{ background: "var(--primary)" }}>Go to {a.type === 'project' ? 'Project' : 'Assignment'} →</button>
+                             </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -923,6 +974,20 @@ export default function StudentDashboard() {
                     </table>
                   </div>
                 )}
+
+                <div className="item-card mt-6">
+                  <div className="item-card-header">
+                    <span className="item-card-title">💡 How is this calculated?</span>
+                  </div>
+                  <p className="item-card-desc" style={{ marginTop: "var(--space-2)", lineHeight: "1.6" }}>
+                    The AI leaderboard score combines your academic performance and classroom engagement:<br/>
+                    • <strong>Assignments (50%)</strong>: Total marks vs. Max possible marks.<br/>
+                    • <strong>Projects (30%)</strong>: Practical project evaluations.<br/>
+                    • <strong>Doubt & Engagement (20%)</strong>: Based on the quantity and AI-evaluated quality of questions you ask via Ask AI.<br/>
+                    <br/>
+                    <em>Formula breakdown: (0.5 * Assignment Score) + (0.3 * Project Score) + (0.2 * Doubt Score)</em>
+                  </p>
+                </div>
               </div>
             )}
           </div>

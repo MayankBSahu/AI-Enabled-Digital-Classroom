@@ -110,12 +110,14 @@ const professorTabs = [
   { key: "assignments", label: "Assignments", icon: icons.assignment },
   { key: "announcements", label: "Announcements", icon: icons.megaphone },
   { key: "analytics", label: "Analytics", icon: icons.chart },
+  { key: "doubts", label: "Ask AI", icon: icons.bot },
+  { key: "leaderboard", label: "Leaderboard", icon: icons.trophy },
 ];
 
 const studentTabs = [
   { key: "courses", label: "My Courses", icon: icons.grid },
   { key: "people", label: "People", icon: icons.users },
-  { key: "submit", label: "Submit Work", icon: icons.send },
+  { key: "assignments", label: "Assignments", icon: icons.assignment },
   { key: "doubts", label: "Ask AI", icon: icons.bot },
   { key: "materials", label: "Materials", icon: icons.book },
   { key: "announcements", label: "Announcements", icon: icons.megaphone },

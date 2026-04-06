@@ -48,49 +48,31 @@ SYSTEM_PROMPT_TEMPLATE = """You are an expert AI Teaching Assistant for a univer
 **Your knowledge sources for this course:** {materials_list}
 
 ## Instructions
-1. Answer the student's question using ONLY the provided course context below. Do not make up information.
-2. When referencing content, **always cite the material name** it came from (e.g., "According to *Lecture 3 - Data Structures*...").
-3. Structure your answers clearly:
-   - Use **bold** for key terms and concepts
-   - Use bullet points or numbered lists for multi-part explanations
-   - Include examples when helpful
-4. If the context only partially answers the question, explain what you found and note what's missing.
-5. If the retrieved context does NOT contain relevant information, say:
-   "I couldn't find information about this in the uploaded course materials. The available materials cover: {available_topics}. Try rephrasing your question using terminology from these materials."
-6. Be conversational, encouraging, and pedagogical — explain concepts step by step.
-7. Keep answers comprehensive but focused (aim for 150-400 words unless the topic requires more)."""
+1. First, attempt to answer the user's question using the provided course context below.
+2. When answering from the context, **always cite the material name** it came from (e.g., "According to *Lecture 3 - Data Structures*...").
+3. If the retrieved context does NOT contain relevant information to answer the question, or if no context is provided, **you must still answer the question using your general knowledge**. However, when you do this, politely state that your answer is based on general knowledge since it wasn't explicitly found in the uploaded course materials.
+4. Structure your answers clearly using **bold** for key terms and bullet points where appropriate.
+5. Be conversational, encouraging, and pedagogical — explain concepts step by step.
+6. Keep answers comprehensive but focused (aim for 150-400 words unless the topic requires more)."""
 
 
 @app.post("/ask-doubt-rag", response_model=DoubtResponse)
 async def ask_doubt(payload: DoubtRequest) -> Dict[str, Any]:
     rows = retrieve_context(payload.course_id, payload.question, top_k=8)
 
-    if not rows:
-        return {
-            "answer": "I couldn't find any relevant information in the uploaded course materials for this question. "
-                      "This might mean:\n\n"
-                      "• The topic hasn't been covered in the uploaded materials yet\n"
-                      "• Try rephrasing your question using specific terms from your course slides or notes\n"
-                      "• Ask your professor to upload materials related to this topic\n\n"
-                      "💡 **Tip:** Questions that use keywords directly from your lecture slides tend to get the best answers!",
-            "citations": []
-        }
-
-    # Use top 5 chunks for context (up from 3)
-    top = rows[:5]
+    top = rows[:5] if rows else []
     context = "\n\n---\n\n".join(
         f"[Source: {r['meta'].get('title', 'Unknown Material')}]\n{r['text']}"
         for r in top
-    )
+    ) if top else "No relevant course context found."
 
     # Build list of source material titles for the AI to reference
     material_titles = list(dict.fromkeys(
         r["meta"].get("title", "") for r in rows if r["meta"].get("title")
-    ))
-    materials_list = ", ".join(f'"{t}"' for t in material_titles) if material_titles else "unknown materials"
-
-    # Available topics summary for the fallback message
-    available_topics = ", ".join(material_titles[:6]) if material_titles else "various course topics"
+    )) if rows else []
+    
+    materials_list = ", ".join(f'"{t}"' for t in material_titles) if material_titles else "No specific course materials available."
+    available_topics = ", ".join(material_titles[:6]) if material_titles else "General topics"
 
     answer = ""
 

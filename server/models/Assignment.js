@@ -8,6 +8,7 @@ const assignmentSchema = new mongoose.Schema(
     rubric: { type: [String], default: [] },
     maxMarks: { type: Number, required: true, min: 1 },
     dueDate: { type: Date, required: true },
+    isProject: { type: Boolean, default: false },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true }
   },
   { timestamps: true }

@@ -2,14 +2,15 @@ const Assignment = require("../models/Assignment");
 const Submission = require("../models/Submission");
 const Doubt = require("../models/Doubt");
 const Leaderboard = require("../models/Leaderboard");
+const Course = require("../models/Course");
 const { normalize, leaderboardTotal } = require("../utils/scoring");
 
 const recomputeLeaderboard = async (req, res) => {
   const { courseId } = req.params;
 
-  const assignments = await Assignment.find({ courseId }).select("_id maxMarks");
+  const assignments = await Assignment.find({ courseId }).select("_id maxMarks isProject");
   const assignmentIds = assignments.map((a) => a._id);
-  const maxMarksByAssignment = new Map(assignments.map((a) => [a._id.toString(), a.maxMarks]));
+  const assignmentMeta = new Map(assignments.map((a) => [a._id.toString(), { maxMarks: a.maxMarks, isProject: !!a.isProject }]));
 
   const submissions = await Submission.find({ assignmentId: { $in: assignmentIds }, status: "evaluated" })
     .select("assignmentId studentId aiResult.marks");
@@ -25,7 +26,8 @@ const recomputeLeaderboard = async (req, res) => {
         studentId: key,
         assignmentTotal: 0,
         assignmentMaxTotal: 0,
-        projectNorm: 0,
+        projectTotal: 0,
+        projectMaxTotal: 0,
         doubtCount: 0,
         doubtQualityTotal: 0
       });
@@ -33,12 +35,23 @@ const recomputeLeaderboard = async (req, res) => {
     return studentMap.get(key);
   };
 
+  const course = await Course.findOne({ courseId }).select("students");
+  if (course && course.students) {
+    course.students.forEach((studentId) => upsertStudent(studentId));
+  }
+
   submissions.forEach((sub) => {
     const student = upsertStudent(sub.studentId);
-    const maxMarks = maxMarksByAssignment.get(sub.assignmentId.toString()) || 0;
+    const meta = assignmentMeta.get(sub.assignmentId.toString());
+    if (!meta) return;
 
-    student.assignmentTotal += sub.aiResult?.marks || 0;
-    student.assignmentMaxTotal += maxMarks;
+    if (meta.isProject) {
+      student.projectTotal += sub.aiResult?.marks || 0;
+      student.projectMaxTotal += meta.maxMarks;
+    } else {
+      student.assignmentTotal += sub.aiResult?.marks || 0;
+      student.assignmentMaxTotal += meta.maxMarks;
+    }
   });
 
   doubts.forEach((doubt) => {
@@ -53,7 +66,11 @@ const recomputeLeaderboard = async (req, res) => {
       : 0;
 
     const assignmentNorm = normalize(assignmentPercent, 0, 100);
-    const projectNorm = student.projectNorm;
+
+    const projectPercent = student.projectMaxTotal > 0
+      ? (student.projectTotal / student.projectMaxTotal) * 100
+      : 0;
+    const projectNorm = normalize(projectPercent, 0, 100);
     const avgDoubtQuality = student.doubtCount > 0 ? student.doubtQualityTotal / student.doubtCount : 0;
     const doubtNorm = Math.min(100, (student.doubtCount * 5) + (avgDoubtQuality * 50));
     const totalScore = leaderboardTotal({ assignmentNorm, projectNorm, doubtNorm });
