@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/Toast";
 import Sidebar from "../components/Sidebar";
@@ -38,6 +38,9 @@ export default function StudentDashboard() {
   /* ── Doubts / Chat ── */
   const [question, setQuestion] = useState("");
   const [chatMessages, setChatMessages] = useState([]);
+  const [allDoubts, setAllDoubts] = useState([]);
+  const [selectedDateGroup, setSelectedDateGroup] = useState(null);
+  const [historySidebarOpen, setHistorySidebarOpen] = useState(true);
   const chatEndRef = useRef(null);
   const chatContainerRef = useRef(null);
 
@@ -46,7 +49,6 @@ export default function StudentDashboard() {
   const [announcements, setAnnouncements] = useState([]);
   const [materials, setMaterials] = useState([]);
 
-  /* ── Loading ── */
   /* ── Loading ── */
   const [submitting, setSubmitting] = useState(false);
   const [aiThinking, setAiThinking] = useState(false);
@@ -147,26 +149,119 @@ export default function StudentDashboard() {
     }
   };
 
+  /* ── Day-based grouping helpers ── */
+  const getDateGroup = (dateStr) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+    const weekAgo = new Date(today); weekAgo.setDate(today.getDate() - 7);
+    const monthAgo = new Date(today); monthAgo.setDate(today.getDate() - 30);
+
+    if (date >= today) return "Today";
+    if (date >= yesterday) return "Yesterday";
+    if (date >= weekAgo) return "Previous 7 Days";
+    if (date >= monthAgo) return "Previous 30 Days";
+    return "Older";
+  };
+
+  const groupedHistory = useMemo(() => {
+    const groups = {};
+    const groupOrder = ["Today", "Yesterday", "Previous 7 Days", "Previous 30 Days", "Older"];
+
+    for (const doubt of allDoubts) {
+      const group = getDateGroup(doubt.createdAt);
+      if (!groups[group]) groups[group] = [];
+      groups[group].push(doubt);
+    }
+
+    return groupOrder
+      .filter(g => groups[g]?.length)
+      .map(g => ({ label: g, doubts: groups[g] }));
+  }, [allDoubts]);
+
   const loadChatHistory = async () => {
     try {
       const { data } = await api.get(`/doubts/course/${courseId}`);
+      const doubts = data.doubts || [];
+      setAllDoubts(doubts);
+
+      // Build messages from all doubts (or filtered by selected group)
       const msgs = [];
-      for (const d of data.doubts || []) {
+      for (const d of doubts) {
         msgs.push({ role: "user", text: d.question, time: d.createdAt });
         msgs.push({ role: "ai", text: d.answer, time: d.createdAt });
       }
       setChatMessages(msgs);
+      setSelectedDateGroup(null);
       setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "auto" }), 100);
     } catch (error) {
       console.error("Failed to load chat history");
     }
   };
 
+  const filterByDateGroup = (groupLabel) => {
+    if (selectedDateGroup === groupLabel) {
+      // Deselect — show all
+      setSelectedDateGroup(null);
+      const msgs = [];
+      for (const d of allDoubts) {
+        msgs.push({ role: "user", text: d.question, time: d.createdAt });
+        msgs.push({ role: "ai", text: d.answer, time: d.createdAt });
+      }
+      setChatMessages(msgs);
+    } else {
+      setSelectedDateGroup(groupLabel);
+      const filtered = allDoubts.filter(d => getDateGroup(d.createdAt) === groupLabel);
+      const msgs = [];
+      for (const d of filtered) {
+        msgs.push({ role: "user", text: d.question, time: d.createdAt });
+        msgs.push({ role: "ai", text: d.answer, time: d.createdAt });
+      }
+      setChatMessages(msgs);
+    }
+    setTimeout(() => chatContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" }), 50);
+  };
+
+  const selectConversation = (doubt) => {
+    const group = getDateGroup(doubt.createdAt);
+    setSelectedDateGroup(group);
+    const filtered = allDoubts.filter(d => getDateGroup(d.createdAt) === group);
+    const msgs = [];
+    for (const d of filtered) {
+      msgs.push({ role: "user", text: d.question, time: d.createdAt });
+      msgs.push({ role: "ai", text: d.answer, time: d.createdAt });
+    }
+    setChatMessages(msgs);
+
+    // Find the index of this specific doubt in the filtered list and scroll
+    const idx = filtered.findIndex(d => d._id === doubt._id);
+    setTimeout(() => {
+      const bubbles = chatContainerRef.current?.querySelectorAll(".chat-bubble-row");
+      if (bubbles && bubbles[idx * 2]) {
+        bubbles[idx * 2].scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 100);
+  };
+
+  const startNewChat = () => {
+    setSelectedDateGroup(null);
+    const msgs = [];
+    for (const d of allDoubts) {
+      msgs.push({ role: "user", text: d.question, time: d.createdAt });
+      msgs.push({ role: "ai", text: d.answer, time: d.createdAt });
+    }
+    setChatMessages(msgs);
+    setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+  };
+
   const clearChatHistory = async () => {
-    if (!window.confirm("Are you sure you want to permanently delete your entire chat history for this course? This action cannot be undone.")) return;
+    if (!window.confirm("Are you sure you want to clear your chat history view for this course? (Data is preserved for analytics)")) return;
     try {
       await api.delete(`/doubts/course/${courseId}`);
       setChatMessages([]);
+      setAllDoubts([]);
+      setSelectedDateGroup(null);
       addToast("Chat history cleared", "success");
     } catch (error) {
       addToast("Failed to clear history", "error");
@@ -178,13 +273,31 @@ export default function StudentDashboard() {
     if (!question.trim()) return;
     const userMsg = question.trim();
     setQuestion("");
-    setChatMessages((prev) => [...prev, { role: "user", text: userMsg, time: new Date().toISOString() }]);
+
+    // If viewing a filtered group, switch to showing all + new
+    if (selectedDateGroup) {
+      const msgs = [];
+      for (const d of allDoubts) {
+        msgs.push({ role: "user", text: d.question, time: d.createdAt });
+        msgs.push({ role: "ai", text: d.answer, time: d.createdAt });
+      }
+      setChatMessages([...msgs, { role: "user", text: userMsg, time: new Date().toISOString() }]);
+      setSelectedDateGroup(null);
+    } else {
+      setChatMessages((prev) => [...prev, { role: "user", text: userMsg, time: new Date().toISOString() }]);
+    }
+
     setAiThinking(true);
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
     try {
       const { data } = await api.post("/doubts/ask", { courseId, question: userMsg });
-      const answer = data.doubt?.answer || "No answer generated.";
+      const doubt = data.doubt;
+      const answer = doubt?.answer || "No answer generated.";
       setChatMessages((prev) => [...prev, { role: "ai", text: answer, time: new Date().toISOString() }]);
+      // Add to allDoubts for sidebar
+      if (doubt) {
+        setAllDoubts((prev) => [...prev, doubt]);
+      }
     } catch (error) {
       setChatMessages((prev) => [...prev, { role: "ai", text: "Sorry, I encountered an error. Please try again.", time: new Date().toISOString() }]);
       addToast(error.response?.data?.message || "Failed to get answer", "error");
@@ -516,87 +629,180 @@ export default function StudentDashboard() {
 
             {/* ── Ask AI Tab ── */}
             {activeTab === "doubts" && (
-              <div className="chatbot-container">
-                {/* Chat Header */}
-                <div className="chatbot-header">
-                  <div className="chatbot-header-info">
-                    <div className="section-icon cyan" style={{ width: 32, height: 32, fontSize: 16 }}>🤖</div>
-                    <div>
-                      <h3 style={{ fontSize: "var(--font-md)", fontWeight: 700, color: "var(--text-primary)" }}>AI Teaching Assistant</h3>
-                      <p style={{ fontSize: "var(--font-xs)", color: "var(--text-tertiary)" }}>Answers from course materials using RAG</p>
-                    </div>
+              <div className="chat-layout">
+                {/* History Sidebar */}
+                <div className={`chat-history-sidebar ${historySidebarOpen ? "open" : "collapsed"}`}>
+                  <div className="chat-history-top">
+                    <button className="chat-new-btn" onClick={startNewChat}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 16, height: 16 }}>
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                      </svg>
+                      New Chat
+                    </button>
+                    <button
+                      className="chat-sidebar-toggle"
+                      onClick={() => setHistorySidebarOpen(!historySidebarOpen)}
+                      title={historySidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 18, height: 18 }}>
+                        {historySidebarOpen ? (
+                          <><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></>
+                        ) : (
+                          <><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></>
+                        )}
+                      </svg>
+                    </button>
                   </div>
-                  <button className="btn-ghost btn-sm" onClick={clearChatHistory} title="Clear chat history permanently" style={{ color: "var(--error)" }}>🗑️ Clear</button>
+
+                  <div className="chat-history-list">
+                    {groupedHistory.length === 0 ? (
+                      <div className="chat-history-empty">
+                        <p>No conversations yet</p>
+                      </div>
+                    ) : (
+                      groupedHistory.map((group) => (
+                        <div key={group.label} className="chat-history-group">
+                          <div className="chat-history-group-label">{group.label}</div>
+                          {group.doubts.map((doubt) => (
+                            <button
+                              key={doubt._id}
+                              className={`chat-history-item ${selectedDateGroup === group.label ? "active" : ""}`}
+                              onClick={() => selectConversation(doubt)}
+                              title={doubt.question}
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="chat-history-item-icon">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                              </svg>
+                              <span className="chat-history-item-text">
+                                {doubt.question.length > 38 ? doubt.question.slice(0, 38) + "…" : doubt.question}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="chat-history-bottom">
+                    <button className="chat-clear-btn" onClick={clearChatHistory}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}>
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      </svg>
+                      Clear History
+                    </button>
+                  </div>
                 </div>
 
-                {/* Chat Messages */}
-                <div className="chatbot-messages" ref={chatContainerRef}>
-                  {chatMessages.length === 0 && !aiThinking && (
-                    <div className="chatbot-empty">
-                      <div style={{ fontSize: 48, marginBottom: 16 }}>🤖</div>
-                      <h3 style={{ color: "var(--text-primary)", marginBottom: 8 }}>Ask me anything about your course!</h3>
-                      <p style={{ color: "var(--text-tertiary)", fontSize: "var(--font-sm)" }}>I answer questions using only your professor's uploaded materials.</p>
+                {/* Main Chat Panel */}
+                <div className="chat-main-panel">
+                  {/* Chat Header */}
+                  <div className="chatbot-header">
+                    <div className="chatbot-header-info">
+                      <button
+                        className="chat-sidebar-toggle-mobile"
+                        onClick={() => setHistorySidebarOpen(!historySidebarOpen)}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 20, height: 20 }}>
+                          <line x1="3" y1="6" x2="21" y2="6" />
+                          <line x1="3" y1="12" x2="21" y2="12" />
+                          <line x1="3" y1="18" x2="21" y2="18" />
+                        </svg>
+                      </button>
+                      <div className="section-icon cyan" style={{ width: 32, height: 32, fontSize: 16 }}>🤖</div>
+                      <div>
+                        <h3 style={{ fontSize: "var(--font-md)", fontWeight: 700, color: "var(--text-primary)" }}>
+                          AI Teaching Assistant
+                        </h3>
+                        <p style={{ fontSize: "var(--font-xs)", color: "var(--text-tertiary)" }}>
+                          {selectedDateGroup ? `Viewing: ${selectedDateGroup}` : "Answers from course materials using RAG"}
+                        </p>
+                      </div>
                     </div>
-                  )}
+                    {selectedDateGroup && (
+                      <button className="btn-ghost btn-sm" onClick={startNewChat} style={{ color: "var(--primary-light)" }}>
+                        ← All Chats
+                      </button>
+                    )}
+                  </div>
 
-                  {chatMessages.map((msg, i) => (
-                    <div key={i} className={`chat-bubble-row ${msg.role === "user" ? "chat-bubble-row-user" : "chat-bubble-row-ai"}`}>
-                      {msg.role === "ai" && (
+                  {/* Chat Messages */}
+                  <div className="chatbot-messages" ref={chatContainerRef}>
+                    {chatMessages.length === 0 && !aiThinking && (
+                      <div className="chatbot-empty">
+                        <div style={{ fontSize: 56, marginBottom: 20 }}>🤖</div>
+                        <h3 style={{ color: "var(--text-primary)", marginBottom: 8, fontSize: "var(--font-xl)" }}>How can I help you today?</h3>
+                        <p style={{ color: "var(--text-tertiary)", fontSize: "var(--font-sm)", maxWidth: 400, lineHeight: 1.6 }}>
+                          I answer questions using only your professor's uploaded course materials. Ask me about any topic covered in your lectures, notes, or slides.
+                        </p>
+                        <div className="chat-suggestions">
+                          <button className="chat-suggestion-chip" onClick={() => { setQuestion("Summarize the key topics covered in this course"); }}>📝 Summarize key topics</button>
+                          <button className="chat-suggestion-chip" onClick={() => { setQuestion("What are the main concepts I should know?"); }}>💡 Main concepts</button>
+                          <button className="chat-suggestion-chip" onClick={() => { setQuestion("Explain the most important topic in detail"); }}>📖 Explain a topic</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {chatMessages.map((msg, i) => (
+                      <div key={i} className={`chat-bubble-row ${msg.role === "user" ? "chat-bubble-row-user" : "chat-bubble-row-ai"}`}>
+                        {msg.role === "ai" && (
+                          <div className="chat-avatar chat-avatar-ai">🤖</div>
+                        )}
+                        <div className={`chat-bubble ${msg.role === "user" ? "chat-bubble-user" : "chat-bubble-ai"}`}>
+                          <p className="chat-bubble-text">{msg.text}</p>
+                          <span className="chat-bubble-time">
+                            {new Date(msg.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                        </div>
+                        {msg.role === "user" && (
+                          <div className="chat-avatar chat-avatar-user">{user?.name?.[0]?.toUpperCase() || "U"}</div>
+                        )}
+                      </div>
+                    ))}
+
+                    {aiThinking && (
+                      <div className="chat-bubble-row chat-bubble-row-ai">
                         <div className="chat-avatar chat-avatar-ai">🤖</div>
-                      )}
-                      <div className={`chat-bubble ${msg.role === "user" ? "chat-bubble-user" : "chat-bubble-ai"}`}>
-                        <p className="chat-bubble-text">{msg.text}</p>
-                        <span className="chat-bubble-time">
-                          {new Date(msg.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                        </span>
+                        <div className="chat-bubble chat-bubble-ai chat-typing">
+                          <span className="typing-dot"></span>
+                          <span className="typing-dot"></span>
+                          <span className="typing-dot"></span>
+                        </div>
                       </div>
-                      {msg.role === "user" && (
-                        <div className="chat-avatar chat-avatar-user">{user?.name?.[0]?.toUpperCase() || "U"}</div>
-                      )}
-                    </div>
-                  ))}
+                    )}
 
-                  {aiThinking && (
-                    <div className="chat-bubble-row chat-bubble-row-ai">
-                      <div className="chat-avatar chat-avatar-ai">🤖</div>
-                      <div className="chat-bubble chat-bubble-ai chat-typing">
-                        <span className="typing-dot"></span>
-                        <span className="typing-dot"></span>
-                        <span className="typing-dot"></span>
-                      </div>
-                    </div>
-                  )}
+                    <div ref={chatEndRef} />
+                  </div>
 
-                  <div ref={chatEndRef} />
-                </div>
-
-                {/* Chat Input */}
-                <div className="chatbot-input-bar">
-                  <textarea
-                    className="chatbot-input"
-                    placeholder="Ask anything about the course material..."
-                    value={question}
-                    onChange={(e) => setQuestion(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        askDoubt();
-                      }
-                    }}
-                    rows={1}
-                    disabled={aiThinking}
-                  />
-                  <button
-                    className="chatbot-send-btn"
-                    onClick={() => askDoubt()}
-                    disabled={aiThinking || !question.trim()}
-                    title="Send message"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="22" y1="2" x2="11" y2="13" />
-                      <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                    </svg>
-                  </button>
+                  {/* Chat Input */}
+                  <div className="chatbot-input-bar">
+                    <textarea
+                      className="chatbot-input"
+                      placeholder="Ask anything about the course material..."
+                      value={question}
+                      onChange={(e) => setQuestion(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          askDoubt();
+                        }
+                      }}
+                      rows={1}
+                      disabled={aiThinking}
+                    />
+                    <button
+                      className="chatbot-send-btn"
+                      onClick={() => askDoubt()}
+                      disabled={aiThinking || !question.trim()}
+                      title="Send message"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="22" y1="2" x2="11" y2="13" />
+                        <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

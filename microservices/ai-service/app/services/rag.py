@@ -1,4 +1,5 @@
 from typing import Dict, Any, List
+import re
 
 import chromadb
 from chromadb.config import Settings
@@ -8,7 +9,31 @@ from app.services.embeddings import cheap_embedding
 from app.services.text_utils import chunk_text
 
 _client = chromadb.PersistentClient(path=CHROMA_PATH, settings=Settings(allow_reset=False))
-_collection = _client.get_or_create_collection(name="course_materials")
+_collection = _client.get_or_create_collection(
+    name="course_materials",
+    metadata={"hnsw:space": "cosine"}   # cosine gives 0-1 distances
+)
+
+
+def _extract_keywords(text: str) -> List[str]:
+    """Extract significant keywords from text (3+ char words, lowered)."""
+    words = re.findall(r'[a-zA-Z]{3,}', text.lower())
+    stop = {
+        'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had',
+        'her', 'was', 'one', 'our', 'out', 'has', 'have', 'been', 'will',
+        'that', 'this', 'with', 'from', 'they', 'what', 'which', 'their',
+        'about', 'would', 'there', 'could', 'other', 'into', 'more', 'some',
+        'than', 'them', 'very', 'when', 'come', 'make', 'like', 'does'
+    }
+    return [w for w in words if w not in stop]
+
+
+def _keyword_overlap_score(query_keywords: List[str], chunk_text_lower: str) -> float:
+    """Calculate what fraction of query keywords appear in the chunk."""
+    if not query_keywords:
+        return 0.0
+    hits = sum(1 for kw in query_keywords if kw in chunk_text_lower)
+    return hits / len(query_keywords)
 
 
 def ingest_material(course_id: str, material_id: str, title: str, text: str) -> Dict[str, Any]:
@@ -39,21 +64,54 @@ def ingest_material(course_id: str, material_id: str, title: str, text: str) -> 
     return {"indexed_chunks": len(ids)}
 
 
-def retrieve_context(course_id: str, question: str, top_k: int = 5) -> List[Dict[str, Any]]:
+def retrieve_context(course_id: str, question: str, top_k: int = 8) -> List[Dict[str, Any]]:
+    """
+    Retrieve relevant chunks using cosine similarity + keyword boosting.
+    Cosine distance ranges 0 (identical) to 2 (opposite).
+    We convert to a similarity score: 1.0 - (distance / 2).
+    """
     q_embedding = cheap_embedding(question)
-    result = _collection.query(
-        query_embeddings=[q_embedding],
-        n_results=top_k,
-        where={"course_id": course_id}
-    )
+
+    # First check if there are ANY documents for this course
+    try:
+        count = _collection.count()
+        if count == 0:
+            return []
+    except Exception:
+        pass
+
+    try:
+        result = _collection.query(
+            query_embeddings=[q_embedding],
+            n_results=top_k,
+            where={"course_id": course_id}
+        )
+    except Exception:
+        return []
 
     docs = result.get("documents", [[]])[0]
     metas = result.get("metadatas", [[]])[0]
     distances = result.get("distances", [[]])[0]
 
+    if not docs:
+        return []
+
+    query_keywords = _extract_keywords(question)
+
     rows = []
     for doc, meta, distance in zip(docs, metas, distances):
-        score = max(0.0, 1.0 - float(distance)) if distance is not None else 0.0
-        rows.append({"text": doc, "meta": meta, "score": score})
+        # Cosine distance: 0 = identical, 2 = opposite
+        # Convert to similarity: 1.0 = identical, 0.0 = opposite
+        cosine_sim = max(0.0, 1.0 - float(distance) / 2.0) if distance is not None else 0.0
 
+        # Keyword boost: add up to 0.3 for keyword overlap
+        kw_boost = _keyword_overlap_score(query_keywords, doc.lower()) * 0.3
+        combined_score = min(1.0, cosine_sim + kw_boost)
+
+        rows.append({"text": doc, "meta": meta, "score": combined_score})
+
+    # Re-rank by combined score (highest first)
+    rows.sort(key=lambda r: r["score"], reverse=True)
+
+    # Return all results — let the AI decide relevance
     return rows
