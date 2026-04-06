@@ -39,7 +39,7 @@ export default function StudentDashboard() {
   const [question, setQuestion] = useState("");
   const [chatMessages, setChatMessages] = useState([]);
   const [allDoubts, setAllDoubts] = useState([]);
-  const [selectedDateGroup, setSelectedDateGroup] = useState(null);
+  const [selectedConversationId, setSelectedConversationId] = useState(null);
   const [historySidebarOpen, setHistorySidebarOpen] = useState(true);
   const chatEndRef = useRef(null);
   const chatContainerRef = useRef(null);
@@ -185,85 +185,38 @@ export default function StudentDashboard() {
       const { data } = await api.get(`/doubts/course/${courseId}`);
       const doubts = data.doubts || [];
       setAllDoubts(doubts);
-
-      // Build messages from all doubts (or filtered by selected group)
-      const msgs = [];
-      for (const d of doubts) {
-        msgs.push({ role: "user", text: d.question, time: d.createdAt });
-        msgs.push({ role: "ai", text: d.answer, time: d.createdAt });
-      }
-      setChatMessages(msgs);
-      setSelectedDateGroup(null);
-      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "auto" }), 100);
+      // Start with empty state — user picks a conversation or starts new
+      setChatMessages([]);
+      setSelectedConversationId(null);
     } catch (error) {
       console.error("Failed to load chat history");
     }
   };
 
-  const filterByDateGroup = (groupLabel) => {
-    if (selectedDateGroup === groupLabel) {
-      // Deselect — show all
-      setSelectedDateGroup(null);
-      const msgs = [];
-      for (const d of allDoubts) {
-        msgs.push({ role: "user", text: d.question, time: d.createdAt });
-        msgs.push({ role: "ai", text: d.answer, time: d.createdAt });
-      }
-      setChatMessages(msgs);
-    } else {
-      setSelectedDateGroup(groupLabel);
-      const filtered = allDoubts.filter(d => getDateGroup(d.createdAt) === groupLabel);
-      const msgs = [];
-      for (const d of filtered) {
-        msgs.push({ role: "user", text: d.question, time: d.createdAt });
-        msgs.push({ role: "ai", text: d.answer, time: d.createdAt });
-      }
-      setChatMessages(msgs);
-    }
+  const selectConversation = (doubt) => {
+    setSelectedConversationId(doubt._id);
+    setChatMessages([
+      { role: "user", text: doubt.question, time: doubt.createdAt },
+      { role: "ai", text: doubt.answer, time: doubt.createdAt }
+    ]);
     setTimeout(() => chatContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" }), 50);
   };
 
-  const selectConversation = (doubt) => {
-    const group = getDateGroup(doubt.createdAt);
-    setSelectedDateGroup(group);
-    const filtered = allDoubts.filter(d => getDateGroup(d.createdAt) === group);
-    const msgs = [];
-    for (const d of filtered) {
-      msgs.push({ role: "user", text: d.question, time: d.createdAt });
-      msgs.push({ role: "ai", text: d.answer, time: d.createdAt });
-    }
-    setChatMessages(msgs);
-
-    // Find the index of this specific doubt in the filtered list and scroll
-    const idx = filtered.findIndex(d => d._id === doubt._id);
-    setTimeout(() => {
-      const bubbles = chatContainerRef.current?.querySelectorAll(".chat-bubble-row");
-      if (bubbles && bubbles[idx * 2]) {
-        bubbles[idx * 2].scrollIntoView({ behavior: "smooth", block: "center" });
-      }
-    }, 100);
-  };
-
   const startNewChat = () => {
-    setSelectedDateGroup(null);
-    const msgs = [];
-    for (const d of allDoubts) {
-      msgs.push({ role: "user", text: d.question, time: d.createdAt });
-      msgs.push({ role: "ai", text: d.answer, time: d.createdAt });
-    }
-    setChatMessages(msgs);
-    setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+    setSelectedConversationId(null);
+    setChatMessages([]);
+    setQuestion("");
   };
 
   const clearChatHistory = async () => {
-    if (!window.confirm("Are you sure you want to clear your chat history view for this course? (Data is preserved for analytics)")) return;
     try {
       await api.delete(`/doubts/course/${courseId}`);
       setChatMessages([]);
       setAllDoubts([]);
-      setSelectedDateGroup(null);
+      setSelectedConversationId(null);
       addToast("Chat history cleared", "success");
     } catch (error) {
+      console.error("Clear error:", error);
       addToast("Failed to clear history", "error");
     }
   };
@@ -274,18 +227,9 @@ export default function StudentDashboard() {
     const userMsg = question.trim();
     setQuestion("");
 
-    // If viewing a filtered group, switch to showing all + new
-    if (selectedDateGroup) {
-      const msgs = [];
-      for (const d of allDoubts) {
-        msgs.push({ role: "user", text: d.question, time: d.createdAt });
-        msgs.push({ role: "ai", text: d.answer, time: d.createdAt });
-      }
-      setChatMessages([...msgs, { role: "user", text: userMsg, time: new Date().toISOString() }]);
-      setSelectedDateGroup(null);
-    } else {
-      setChatMessages((prev) => [...prev, { role: "user", text: userMsg, time: new Date().toISOString() }]);
-    }
+    // Always start a fresh message view when asking
+    setSelectedConversationId("pending");
+    setChatMessages([{ role: "user", text: userMsg, time: new Date().toISOString() }]);
 
     setAiThinking(true);
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
@@ -293,10 +237,14 @@ export default function StudentDashboard() {
       const { data } = await api.post("/doubts/ask", { courseId, question: userMsg });
       const doubt = data.doubt;
       const answer = doubt?.answer || "No answer generated.";
-      setChatMessages((prev) => [...prev, { role: "ai", text: answer, time: new Date().toISOString() }]);
-      // Add to allDoubts for sidebar
+      setChatMessages([
+        { role: "user", text: userMsg, time: doubt?.createdAt || new Date().toISOString() },
+        { role: "ai", text: answer, time: doubt?.createdAt || new Date().toISOString() }
+      ]);
+      // Add to allDoubts for sidebar and select it
       if (doubt) {
         setAllDoubts((prev) => [...prev, doubt]);
+        setSelectedConversationId(doubt._id);
       }
     } catch (error) {
       setChatMessages((prev) => [...prev, { role: "ai", text: "Sorry, I encountered an error. Please try again.", time: new Date().toISOString() }]);
@@ -642,15 +590,12 @@ export default function StudentDashboard() {
                     </button>
                     <button
                       className="chat-sidebar-toggle"
-                      onClick={() => setHistorySidebarOpen(!historySidebarOpen)}
-                      title={historySidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+                      onClick={() => setHistorySidebarOpen(false)}
+                      title="Collapse sidebar"
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 18, height: 18 }}>
-                        {historySidebarOpen ? (
-                          <><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></>
-                        ) : (
-                          <><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></>
-                        )}
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        <line x1="9" y1="3" x2="9" y2="21" />
                       </svg>
                     </button>
                   </div>
@@ -667,7 +612,7 @@ export default function StudentDashboard() {
                           {group.doubts.map((doubt) => (
                             <button
                               key={doubt._id}
-                              className={`chat-history-item ${selectedDateGroup === group.label ? "active" : ""}`}
+                              className={`chat-history-item ${selectedConversationId === doubt._id ? "active" : ""}`}
                               onClick={() => selectConversation(doubt)}
                               title={doubt.question}
                             >
@@ -675,7 +620,7 @@ export default function StudentDashboard() {
                                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                               </svg>
                               <span className="chat-history-item-text">
-                                {doubt.question.length > 38 ? doubt.question.slice(0, 38) + "…" : doubt.question}
+                                {doubt.question.length > 34 ? doubt.question.slice(0, 34) + "…" : doubt.question}
                               </span>
                             </button>
                           ))}
@@ -700,29 +645,32 @@ export default function StudentDashboard() {
                   {/* Chat Header */}
                   <div className="chatbot-header">
                     <div className="chatbot-header-info">
-                      <button
-                        className="chat-sidebar-toggle-mobile"
-                        onClick={() => setHistorySidebarOpen(!historySidebarOpen)}
-                      >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 20, height: 20 }}>
-                          <line x1="3" y1="6" x2="21" y2="6" />
-                          <line x1="3" y1="12" x2="21" y2="12" />
-                          <line x1="3" y1="18" x2="21" y2="18" />
-                        </svg>
-                      </button>
+                      {/* Sidebar Toggle (always visible) */}
+                      {!historySidebarOpen && (
+                        <button
+                          className="chat-sidebar-expand-btn"
+                          onClick={() => setHistorySidebarOpen(true)}
+                          title="Open sidebar"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 18, height: 18 }}>
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                            <line x1="9" y1="3" x2="9" y2="21" />
+                          </svg>
+                        </button>
+                      )}
                       <div className="section-icon cyan" style={{ width: 32, height: 32, fontSize: 16 }}>🤖</div>
                       <div>
                         <h3 style={{ fontSize: "var(--font-md)", fontWeight: 700, color: "var(--text-primary)" }}>
                           AI Teaching Assistant
                         </h3>
                         <p style={{ fontSize: "var(--font-xs)", color: "var(--text-tertiary)" }}>
-                          {selectedDateGroup ? `Viewing: ${selectedDateGroup}` : "Answers from course materials using RAG"}
+                          Answers from course materials using RAG
                         </p>
                       </div>
                     </div>
-                    {selectedDateGroup && (
+                    {selectedConversationId && (
                       <button className="btn-ghost btn-sm" onClick={startNewChat} style={{ color: "var(--primary-light)" }}>
-                        ← All Chats
+                        + New Chat
                       </button>
                     )}
                   </div>

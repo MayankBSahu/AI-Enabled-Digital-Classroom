@@ -16,8 +16,8 @@ _collection = _client.get_or_create_collection(
 
 
 def _extract_keywords(text: str) -> List[str]:
-    """Extract significant keywords from text (3+ char words, lowered)."""
-    words = re.findall(r'[a-zA-Z]{3,}', text.lower())
+    # Match words that are 2+ letters/numbers, OR single digits
+    words = re.findall(r'\b[a-z0-9]{2,}\b|\b\d\b', text.lower())
     # Filter common stop words
     stop = {
         'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had',
@@ -105,8 +105,14 @@ def retrieve_context(course_id: str, question: str, top_k: int = 10) -> List[Dic
     # Re-rank by combined score (highest first)
     rows.sort(key=lambda r: r["score"], reverse=True)
 
+    print(f"DEBUG RAG: Query '{question}' returned {len(docs)} raw docs. Top raw distances: {distances[:5]}")
+    for i, r in enumerate(rows[:3]):
+        print(f"DEBUG RAG [{i}]: Score: {r['score']:.3f} | Title: {r['meta'].get('title')} | snippet: {r['text'][:50]}")
+
     # Return top results - always return at least something if we have matches
     # Only filter truly irrelevant results (negative scores)
     rows = [r for r in rows if r["score"] > 0.0]
+    
+    print(f"DEBUG RAG: Returning {len(rows)} filtered docs")
 
     return rows
