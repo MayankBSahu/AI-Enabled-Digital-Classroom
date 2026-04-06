@@ -1987,7 +1987,7 @@ button:disabled,
   min-width: 260px;
   display: flex;
   flex-direction: column;
-  background: rgba(10, 12, 20, 0.85);
+  background: transparent;
   border-right: 1px solid var(--border);
   transition: width 0.25s ease, min-width 0.25s ease;
   overflow: hidden;
@@ -2032,9 +2032,10 @@ button:disabled,
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-3);
+  padding: var(--space-4);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  height: 73px;
 }
 
 .chat-new-btn {
@@ -2172,7 +2173,6 @@ button:disabled,
 /* History Bottom */
 .chat-history-bottom {
   padding: var(--space-3);
-  border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
 
@@ -2204,6 +2204,7 @@ button:disabled,
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
+  background: transparent;
 }
 
 .chatbot-header {
@@ -2212,9 +2213,9 @@ button:disabled,
   justify-content: space-between;
   padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--border);
-  background: var(--surface-glass);
-  backdrop-filter: blur(20px);
+  background: transparent;
   flex-shrink: 0;
+  height: 73px;
 }
 
 .chatbot-header-info {
@@ -2406,9 +2407,7 @@ button:disabled,
   align-items: flex-end;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
-  border-top: 1px solid var(--border);
-  background: var(--surface-glass);
-  backdrop-filter: blur(20px);
+  background: transparent;
   flex-shrink: 0;
 }
 
