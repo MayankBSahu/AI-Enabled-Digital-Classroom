@@ -9,10 +9,10 @@ from app.services.embeddings import cheap_embedding
 from app.services.text_utils import chunk_text
 
 _client = chromadb.PersistentClient(path=CHROMA_PATH, settings=Settings(allow_reset=False))
-_collection = _client.get_or_create_collection(name="course_materials")
-
-# Minimum relevance score — filter out noise
-RELEVANCE_THRESHOLD = 0.12
+_collection = _client.get_or_create_collection(
+    name="course_materials",
+    metadata={"hnsw:space": "cosine"}  # Use cosine similarity instead of L2
+)
 
 
 def _extract_keywords(text: str) -> List[str]:
@@ -65,40 +65,48 @@ def ingest_material(course_id: str, material_id: str, title: str, text: str) -> 
     return {"indexed_chunks": len(ids)}
 
 
-def retrieve_context(course_id: str, question: str, top_k: int = 8) -> List[Dict[str, Any]]:
+def retrieve_context(course_id: str, question: str, top_k: int = 10) -> List[Dict[str, Any]]:
     """
-    Retrieve relevant chunks using vector similarity + keyword boosting.
-    Returns more candidates and re-ranks with keyword overlap.
+    Retrieve relevant chunks using cosine similarity + keyword boosting.
+    ChromaDB cosine distance = 1 - cosine_similarity, so score = 1 - distance.
     """
     q_embedding = cheap_embedding(question)
-    result = _collection.query(
-        query_embeddings=[q_embedding],
-        n_results=top_k,
-        where={"course_id": course_id}
-    )
+
+    try:
+        result = _collection.query(
+            query_embeddings=[q_embedding],
+            n_results=top_k,
+            where={"course_id": course_id}
+        )
+    except Exception:
+        return []
 
     docs = result.get("documents", [[]])[0]
     metas = result.get("metadatas", [[]])[0]
     distances = result.get("distances", [[]])[0]
 
+    if not docs:
+        return []
+
     query_keywords = _extract_keywords(question)
 
     rows = []
     for doc, meta, distance in zip(docs, metas, distances):
-        # Base similarity score (ChromaDB returns L2 distance)
-        base_score = max(0.0, 1.0 - float(distance)) if distance is not None else 0.0
+        # Cosine distance: 0 = identical, 2 = opposite
+        # Convert to similarity: 1.0 = identical, -1.0 = opposite
+        cosine_sim = 1.0 - float(distance) if distance is not None else 0.0
 
-        # Filter out irrelevant chunks
-        if base_score < RELEVANCE_THRESHOLD:
-            continue
-
-        # Keyword boost: add up to 0.3 for keyword overlap
-        kw_boost = _keyword_overlap_score(query_keywords, doc.lower()) * 0.3
-        combined_score = min(1.0, base_score + kw_boost)
+        # Keyword boost: add up to 0.35 for keyword overlap
+        kw_boost = _keyword_overlap_score(query_keywords, doc.lower()) * 0.35
+        combined_score = min(1.0, cosine_sim + kw_boost)
 
         rows.append({"text": doc, "meta": meta, "score": combined_score})
 
     # Re-rank by combined score (highest first)
     rows.sort(key=lambda r: r["score"], reverse=True)
+
+    # Return top results - always return at least something if we have matches
+    # Only filter truly irrelevant results (negative scores)
+    rows = [r for r in rows if r["score"] > 0.0]
 
     return rows
