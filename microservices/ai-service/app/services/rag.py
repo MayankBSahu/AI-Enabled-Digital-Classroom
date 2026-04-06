@@ -9,15 +9,16 @@ from app.services.embeddings import cheap_embedding
 from app.services.text_utils import chunk_text
 
 _client = chromadb.PersistentClient(path=CHROMA_PATH, settings=Settings(allow_reset=False))
-_collection = _client.get_or_create_collection(
-    name="course_materials",
-    metadata={"hnsw:space": "cosine"}   # cosine gives 0-1 distances
-)
+_collection = _client.get_or_create_collection(name="course_materials")
+
+# Minimum relevance score — filter out noise
+RELEVANCE_THRESHOLD = 0.12
 
 
 def _extract_keywords(text: str) -> List[str]:
     """Extract significant keywords from text (3+ char words, lowered)."""
     words = re.findall(r'[a-zA-Z]{3,}', text.lower())
+    # Filter common stop words
     stop = {
         'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had',
         'her', 'was', 'one', 'our', 'out', 'has', 'have', 'been', 'will',
@@ -66,52 +67,38 @@ def ingest_material(course_id: str, material_id: str, title: str, text: str) -> 
 
 def retrieve_context(course_id: str, question: str, top_k: int = 8) -> List[Dict[str, Any]]:
     """
-    Retrieve relevant chunks using cosine similarity + keyword boosting.
-    Cosine distance ranges 0 (identical) to 2 (opposite).
-    We convert to a similarity score: 1.0 - (distance / 2).
+    Retrieve relevant chunks using vector similarity + keyword boosting.
+    Returns more candidates and re-ranks with keyword overlap.
     """
     q_embedding = cheap_embedding(question)
-
-    # First check if there are ANY documents for this course
-    try:
-        count = _collection.count()
-        if count == 0:
-            return []
-    except Exception:
-        pass
-
-    try:
-        result = _collection.query(
-            query_embeddings=[q_embedding],
-            n_results=top_k,
-            where={"course_id": course_id}
-        )
-    except Exception:
-        return []
+    result = _collection.query(
+        query_embeddings=[q_embedding],
+        n_results=top_k,
+        where={"course_id": course_id}
+    )
 
     docs = result.get("documents", [[]])[0]
     metas = result.get("metadatas", [[]])[0]
     distances = result.get("distances", [[]])[0]
 
-    if not docs:
-        return []
-
     query_keywords = _extract_keywords(question)
 
     rows = []
     for doc, meta, distance in zip(docs, metas, distances):
-        # Cosine distance: 0 = identical, 2 = opposite
-        # Convert to similarity: 1.0 = identical, 0.0 = opposite
-        cosine_sim = max(0.0, 1.0 - float(distance) / 2.0) if distance is not None else 0.0
+        # Base similarity score (ChromaDB returns L2 distance)
+        base_score = max(0.0, 1.0 - float(distance)) if distance is not None else 0.0
+
+        # Filter out irrelevant chunks
+        if base_score < RELEVANCE_THRESHOLD:
+            continue
 
         # Keyword boost: add up to 0.3 for keyword overlap
         kw_boost = _keyword_overlap_score(query_keywords, doc.lower()) * 0.3
-        combined_score = min(1.0, cosine_sim + kw_boost)
+        combined_score = min(1.0, base_score + kw_boost)
 
         rows.append({"text": doc, "meta": meta, "score": combined_score})
 
     # Re-rank by combined score (highest first)
     rows.sort(key=lambda r: r["score"], reverse=True)
 
-    # Return all results — let the AI decide relevance
     return rows
