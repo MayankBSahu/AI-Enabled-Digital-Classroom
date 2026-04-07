@@ -4,8 +4,8 @@ const { askCourseDoubt, getCourseDoubts, clearCourseDoubts } = require("../contr
 
 const router = express.Router();
 
-router.post("/ask", auth("student"), askCourseDoubt);
-router.get("/course/:courseId", auth("student"), getCourseDoubts);
-router.delete("/course/:courseId", auth("student"), clearCourseDoubts);
+router.post("/ask", auth("student", "professor"), askCourseDoubt);
+router.get("/course/:courseId", auth("student", "professor"), getCourseDoubts);
+router.delete("/course/:courseId", auth("student", "professor"), clearCourseDoubts);
 
 module.exports = router;

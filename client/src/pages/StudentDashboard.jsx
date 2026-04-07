@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/Toast";
 import Sidebar from "../components/Sidebar";
@@ -38,15 +38,23 @@ export default function StudentDashboard() {
   /* ── Doubts / Chat ── */
   const [question, setQuestion] = useState("");
   const [chatMessages, setChatMessages] = useState([]);
+  const [allDoubts, setAllDoubts] = useState([]);
+  const [selectedConversationId, setSelectedConversationId] = useState(null);
+  const [historySidebarOpen, setHistorySidebarOpen] = useState(true);
   const chatEndRef = useRef(null);
   const chatContainerRef = useRef(null);
 
   /* ── Lists ── */
   const [leaderboard, setLeaderboard] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
+  const [hasNewAnnouncements, setHasNewAnnouncements] = useState(false);
   const [materials, setMaterials] = useState([]);
 
-  /* ── Loading ── */
+  /* ── Announcement Comments ── */
+  const [openCommentsId, setOpenCommentsId] = useState(null);
+  const [comments, setComments] = useState([]);
+  const [newComment, setNewComment] = useState("");
+
   /* ── Loading ── */
   const [submitting, setSubmitting] = useState(false);
   const [aiThinking, setAiThinking] = useState(false);
@@ -65,14 +73,24 @@ export default function StudentDashboard() {
   }, []);
 
   useEffect(() => {
+    if (courseId) {
+       loadAnnouncements(true);
+    }
+  }, [courseId]);
+
+  useEffect(() => {
     if (!courseId) return;
     if (activeTab === "people" || activeTab === "courses") loadStudents();
-    else if (activeTab === "announcements") loadAnnouncements();
     else if (activeTab === "materials" || activeTab === "files") loadMaterials();
     else if (activeTab === "leaderboard") loadLeaderboard();
     else if (activeTab === "doubts") loadChatHistory();
-    else if (activeTab === "submit") { loadAssignments(); loadMySubmissions(); }
-  }, [activeTab, courseId]);
+    else if (activeTab === "assignments") { loadAssignments(); loadMySubmissions(); }
+
+    if (activeTab === "announcements" && hasNewAnnouncements) {
+      setHasNewAnnouncements(false);
+      localStorage.setItem(`last_announcement_view_${courseId}`, Date.now().toString());
+    }
+  }, [activeTab, courseId, hasNewAnnouncements]);
 
   const loadStudents = async () => {
     try {
@@ -147,28 +165,95 @@ export default function StudentDashboard() {
     }
   };
 
+  /* ── Day-based grouping helpers ── */
+  const getDateGroup = (dateStr) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+    const weekAgo = new Date(today); weekAgo.setDate(today.getDate() - 7);
+    const monthAgo = new Date(today); monthAgo.setDate(today.getDate() - 30);
+
+    if (date >= today) return "Today";
+    if (date >= yesterday) return "Yesterday";
+    if (date >= weekAgo) return "Previous 7 Days";
+    if (date >= monthAgo) return "Previous 30 Days";
+    return "Older";
+  };
+
+  const groupedHistory = useMemo(() => {
+    // 1. Group single doubts into cohesive Threads
+    const threadsMap = {};
+    for (const doubt of allDoubts) {
+      const tId = doubt.sessionId || doubt._id;
+      if (!threadsMap[tId]) {
+        threadsMap[tId] = {
+           id: tId,
+           title: doubt.question, 
+           doubts: [],
+           createdAt: doubt.createdAt
+        };
+      }
+      threadsMap[tId].doubts.push(doubt);
+    }
+    
+    // Sort threads descending
+    const threads = Object.values(threadsMap).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    // 2. Group threads by Date Section
+    const groups = {};
+    const groupOrder = ["Today", "Yesterday", "Previous 7 Days", "Previous 30 Days", "Older"];
+
+    for (const thread of threads) {
+      const group = getDateGroup(thread.createdAt);
+      if (!groups[group]) groups[group] = [];
+      groups[group].push(thread);
+    }
+
+    return groupOrder
+      .filter(g => groups[g]?.length)
+      .map(g => ({ label: g, threads: groups[g] }));
+  }, [allDoubts]);
+
   const loadChatHistory = async () => {
     try {
       const { data } = await api.get(`/doubts/course/${courseId}`);
-      const msgs = [];
-      for (const d of data.doubts || []) {
-        msgs.push({ role: "user", text: d.question, time: d.createdAt });
-        msgs.push({ role: "ai", text: d.answer, time: d.createdAt });
-      }
-      setChatMessages(msgs);
-      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "auto" }), 100);
+      const doubts = data.doubts || [];
+      setAllDoubts(doubts);
+      // Start with empty state — user picks a conversation or starts new
+      setChatMessages([]);
+      setSelectedConversationId(null);
     } catch (error) {
       console.error("Failed to load chat history");
     }
   };
 
+  const selectConversation = (thread) => {
+    setSelectedConversationId(thread.id);
+    const msgs = [];
+    for (const doubt of thread.doubts) {
+      msgs.push({ role: "user", text: doubt.question, time: doubt.createdAt });
+      msgs.push({ role: "ai", text: doubt.answer, time: doubt.createdAt });
+    }
+    setChatMessages(msgs);
+    setTimeout(() => chatContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" }), 50);
+  };
+
+  const startNewChat = () => {
+    setSelectedConversationId(`session_${Date.now()}`); // Create a unique local session ID
+    setChatMessages([]);
+    setQuestion("");
+  };
+
   const clearChatHistory = async () => {
-    if (!window.confirm("Are you sure you want to permanently delete your entire chat history for this course? This action cannot be undone.")) return;
     try {
       await api.delete(`/doubts/course/${courseId}`);
       setChatMessages([]);
+      setAllDoubts([]);
+      setSelectedConversationId(null);
       addToast("Chat history cleared", "success");
     } catch (error) {
+      console.error("Clear error:", error);
       addToast("Failed to clear history", "error");
     }
   };
@@ -178,13 +263,30 @@ export default function StudentDashboard() {
     if (!question.trim()) return;
     const userMsg = question.trim();
     setQuestion("");
+
+    // Determine the active session
+    let sessionId = selectedConversationId;
+    if (!sessionId || sessionId === "pending") {
+      sessionId = `session_${Date.now()}`;
+      setSelectedConversationId(sessionId);
+    }
+
     setChatMessages((prev) => [...prev, { role: "user", text: userMsg, time: new Date().toISOString() }]);
+
     setAiThinking(true);
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
     try {
-      const { data } = await api.post("/doubts/ask", { courseId, question: userMsg });
-      const answer = data.doubt?.answer || "No answer generated.";
-      setChatMessages((prev) => [...prev, { role: "ai", text: answer, time: new Date().toISOString() }]);
+      const { data } = await api.post("/doubts/ask", { courseId, question: userMsg, sessionId });
+      const doubt = data.doubt;
+      const answer = doubt?.answer || "No answer generated.";
+      
+      setChatMessages((prev) => [...prev, { role: "ai", text: answer, time: doubt?.createdAt || new Date().toISOString() }]);
+      
+      if (doubt) {
+        setAllDoubts((prev) => [...prev, doubt]);
+        // Update selection explicitly in case of backend ID change
+        setSelectedConversationId(doubt.sessionId || doubt._id);
+      }
     } catch (error) {
       setChatMessages((prev) => [...prev, { role: "ai", text: "Sorry, I encountered an error. Please try again.", time: new Date().toISOString() }]);
       addToast(error.response?.data?.message || "Failed to get answer", "error");
@@ -203,12 +305,20 @@ export default function StudentDashboard() {
     }
   };
 
-  const loadAnnouncements = async () => {
+  const loadAnnouncements = async (background = false) => {
     try {
       const { data } = await api.get(`/announcements/course/${courseId}`);
-      setAnnouncements(data.announcements || []);
+      const fetched = data.announcements || [];
+      setAnnouncements(fetched);
+      if (background && fetched.length > 0) {
+         const lastViewed = localStorage.getItem(`last_announcement_view_${courseId}`);
+         if (!lastViewed || new Date(fetched[0].createdAt).getTime() > parseInt(lastViewed, 10)) {
+            setHasNewAnnouncements(true);
+            addToast(`You have ${fetched.length} course announcements to review.`, "info");
+         }
+      }
     } catch (error) {
-      addToast(error.response?.data?.message || "Failed to load announcements", "error");
+      if (!background) addToast(error.response?.data?.message || "Failed to load announcements", "error");
     }
   };
 
@@ -218,6 +328,32 @@ export default function StudentDashboard() {
       setMaterials(data.materials || []);
     } catch (error) {
       addToast(error.response?.data?.message || "Failed to load materials", "error");
+    }
+  };
+
+  const toggleComments = async (announcementId) => {
+    if (openCommentsId === announcementId) {
+      setOpenCommentsId(null);
+      return;
+    }
+    setOpenCommentsId(announcementId);
+    try {
+      const { data } = await api.get(`/announcements/${announcementId}/comments`);
+      setComments(data.comments || []);
+    } catch (error) {
+      setComments([]);
+    }
+  };
+
+  const postComment = async (announcementId) => {
+    if (!newComment.trim()) return;
+    try {
+      await api.post(`/announcements/${announcementId}/comments`, { text: newComment });
+      setNewComment("");
+      const { data } = await api.get(`/announcements/${announcementId}/comments`);
+      setComments(data.comments || []);
+    } catch (error) {
+      addToast("Failed to post comment", "error");
     }
   };
 
@@ -303,7 +439,7 @@ export default function StudentDashboard() {
                         </div>
                         <div className="course-card-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <span className="course-card-students text-secondary text-sm">Select to view students</span>
-                          <button className="btn-primary btn-sm" onClick={(e) => { e.stopPropagation(); setSelectedCourse(c); setCourseId(c.courseId); setActiveTab("submit"); }}>View Dashboard →</button>
+                          <button className="btn-primary btn-sm" onClick={(e) => { e.stopPropagation(); setSelectedCourse(c); setCourseId(c.courseId); setActiveTab("assignments"); }}>View Dashboard →</button>
                         </div>
                       </div>
                     ))
@@ -387,8 +523,8 @@ export default function StudentDashboard() {
               </div>
             )}
 
-            {/* ── Submit Work Tab ── */}
-            {activeTab === "submit" && (
+            {/* ── Assignments Tab ── */}
+            {activeTab === "assignments" && (
               <div style={{ maxWidth: 640 }}>
                 <section className="glass-card-static">
                   <div className="section-header">
@@ -398,6 +534,15 @@ export default function StudentDashboard() {
                       <p>Upload your work for AI-powered evaluation</p>
                     </div>
                   </div>
+
+                  {announcements.find(a => a.type === 'assignment' || a.type === 'project') && (
+                    <div className="item-card mb-6" style={{ borderLeft: "4px solid var(--primary-light)", background: "var(--surface-hover)", cursor: "pointer" }} onClick={() => setSelectedAssignmentId(announcements.find(a => a.type === 'assignment' || a.type === 'project').referenceId || "")}>
+                      <div className="item-card-header">
+                        <span className="item-card-title text-primary-light">🚀 Latest Requirement: {announcements.find(a => a.type === 'assignment' || a.type === 'project').title}</span>
+                      </div>
+                      <p className="item-card-desc" style={{ marginTop: "var(--space-2)" }}>{announcements.find(a => a.type === 'assignment' || a.type === 'project').message}</p>
+                    </div>
+                  )}
 
                   <form className="form-grid" onSubmit={submitAssignment}>
                     <div className="form-group">
@@ -412,7 +557,7 @@ export default function StudentDashboard() {
                         </option>
                         {assignments.map((a) => (
                           <option key={a._id} value={a._id}>
-                            {a.title} {a.maxMarks ? `(${a.maxMarks} marks)` : ""}
+                            {a.isProject ? "[Project] " : ""}{a.title} {a.maxMarks ? `(${a.maxMarks} marks)` : ""}
                           </option>
                         ))}
                       </select>
@@ -472,9 +617,12 @@ export default function StudentDashboard() {
                         <div key={s._id} className="item-card">
                           <div className="item-card-header">
                             <span className="item-card-title">{s.assignmentId?.title || "Assignment"}</span>
-                            <span className={`badge ${s.status === "evaluated" ? "badge-accent" : s.status === "error" ? "badge-warning" : "badge-primary"}`}>
-                              {s.status}
-                            </span>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              {s.assignmentId?.isProject && <span className="badge badge-accent">Project</span>}
+                              <span className={`badge ${s.status === "evaluated" ? "badge-accent" : s.status === "error" ? "badge-warning" : "badge-primary"}`}>
+                                {s.status}
+                              </span>
+                            </div>
                           </div>
                           {s.aiResult && s.status === "evaluated" && (
                             <div style={{ marginTop: "var(--space-3)" }}>
@@ -516,87 +664,180 @@ export default function StudentDashboard() {
 
             {/* ── Ask AI Tab ── */}
             {activeTab === "doubts" && (
-              <div className="chatbot-container">
-                {/* Chat Header */}
-                <div className="chatbot-header">
-                  <div className="chatbot-header-info">
-                    <div className="section-icon cyan" style={{ width: 32, height: 32, fontSize: 16 }}>🤖</div>
-                    <div>
-                      <h3 style={{ fontSize: "var(--font-md)", fontWeight: 700, color: "var(--text-primary)" }}>AI Teaching Assistant</h3>
-                      <p style={{ fontSize: "var(--font-xs)", color: "var(--text-tertiary)" }}>Answers from course materials using RAG</p>
-                    </div>
+              <div className="chat-layout">
+                {/* History Sidebar */}
+                <div className={`chat-history-sidebar ${historySidebarOpen ? "open" : "collapsed"}`}>
+                  <div className="chat-history-top">
+                    <button className="chat-new-btn" onClick={startNewChat}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 16, height: 16 }}>
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                      </svg>
+                      New Chat
+                    </button>
+                    <button
+                      className="chat-sidebar-toggle"
+                      onClick={() => setHistorySidebarOpen(false)}
+                      title="Collapse sidebar"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 18, height: 18 }}>
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        <line x1="9" y1="3" x2="9" y2="21" />
+                      </svg>
+                    </button>
                   </div>
-                  <button className="btn-ghost btn-sm" onClick={clearChatHistory} title="Clear chat history permanently" style={{ color: "var(--error)" }}>🗑️ Clear</button>
+
+                  <div className="chat-history-list">
+                    {groupedHistory.length === 0 ? (
+                      <div className="chat-history-empty">
+                        <p>No conversations yet</p>
+                      </div>
+                    ) : (
+                      groupedHistory.map((group) => (
+                        <div key={group.label} className="chat-history-group">
+                          <div className="chat-history-group-label">{group.label}</div>
+                          {group.threads.map((thread) => (
+                            <button
+                              key={thread.id}
+                              className={`chat-history-item ${selectedConversationId === thread.id ? "active" : ""}`}
+                              onClick={() => selectConversation(thread)}
+                              title={thread.title}
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="chat-history-item-icon">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                              </svg>
+                              <span className="chat-history-item-text">
+                                {thread.title}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="chat-history-bottom">
+                    <button className="chat-clear-btn" onClick={clearChatHistory}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}>
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      </svg>
+                      Clear History
+                    </button>
+                  </div>
                 </div>
 
-                {/* Chat Messages */}
-                <div className="chatbot-messages" ref={chatContainerRef}>
-                  {chatMessages.length === 0 && !aiThinking && (
-                    <div className="chatbot-empty">
-                      <div style={{ fontSize: 48, marginBottom: 16 }}>🤖</div>
-                      <h3 style={{ color: "var(--text-primary)", marginBottom: 8 }}>Ask me anything about your course!</h3>
-                      <p style={{ color: "var(--text-tertiary)", fontSize: "var(--font-sm)" }}>I answer questions using only your professor's uploaded materials.</p>
+                {/* Main Chat Panel */}
+                <div className="chat-main-panel">
+                  {/* Chat Header */}
+                  <div className="chatbot-header">
+                    <div className="chatbot-header-info">
+                      {/* Sidebar Toggle (always visible) */}
+                      {!historySidebarOpen && (
+                        <button
+                          className="chat-sidebar-expand-btn"
+                          onClick={() => setHistorySidebarOpen(true)}
+                          title="Open sidebar"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 18, height: 18 }}>
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                            <line x1="9" y1="3" x2="9" y2="21" />
+                          </svg>
+                        </button>
+                      )}
+                      <div className="section-icon cyan" style={{ width: 32, height: 32, fontSize: 16 }}>🤖</div>
+                      <div>
+                        <h3 style={{ fontSize: "var(--font-md)", fontWeight: 700, color: "var(--text-primary)" }}>
+                          AI Teaching Assistant
+                        </h3>
+                        <p style={{ fontSize: "var(--font-xs)", color: "var(--text-tertiary)" }}>
+                          Answers from course materials using RAG
+                        </p>
+                      </div>
                     </div>
-                  )}
+                    {selectedConversationId && (
+                      <button className="btn-ghost btn-sm" onClick={startNewChat} style={{ color: "var(--primary-light)" }}>
+                        + New Chat
+                      </button>
+                    )}
+                  </div>
 
-                  {chatMessages.map((msg, i) => (
-                    <div key={i} className={`chat-bubble-row ${msg.role === "user" ? "chat-bubble-row-user" : "chat-bubble-row-ai"}`}>
-                      {msg.role === "ai" && (
+                  {/* Chat Messages */}
+                  <div className="chatbot-messages" ref={chatContainerRef}>
+                    {chatMessages.length === 0 && !aiThinking && (
+                      <div className="chatbot-empty">
+                        <div style={{ fontSize: 56, marginBottom: 20 }}>🤖</div>
+                        <h3 style={{ color: "var(--text-primary)", marginBottom: 8, fontSize: "var(--font-xl)" }}>How can I help you today?</h3>
+                        <p style={{ color: "var(--text-tertiary)", fontSize: "var(--font-sm)", maxWidth: 400, lineHeight: 1.6 }}>
+                          I answer questions using only your professor's uploaded course materials. Ask me about any topic covered in your lectures, notes, or slides.
+                        </p>
+                        <div className="chat-suggestions">
+                          <button className="chat-suggestion-chip" onClick={() => { setQuestion("Summarize the key topics covered in this course"); }}>📝 Summarize key topics</button>
+                          <button className="chat-suggestion-chip" onClick={() => { setQuestion("What are the main concepts I should know?"); }}>💡 Main concepts</button>
+                          <button className="chat-suggestion-chip" onClick={() => { setQuestion("Explain the most important topic in detail"); }}>📖 Explain a topic</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {chatMessages.map((msg, i) => (
+                      <div key={i} className={`chat-bubble-row ${msg.role === "user" ? "chat-bubble-row-user" : "chat-bubble-row-ai"}`}>
+                        {msg.role === "ai" && (
+                          <div className="chat-avatar chat-avatar-ai">🤖</div>
+                        )}
+                        <div className={`chat-bubble ${msg.role === "user" ? "chat-bubble-user" : "chat-bubble-ai"}`}>
+                          <p className="chat-bubble-text">{msg.text}</p>
+                          <span className="chat-bubble-time">
+                            {new Date(msg.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                        </div>
+                        {msg.role === "user" && (
+                          <div className="chat-avatar chat-avatar-user">{user?.name?.[0]?.toUpperCase() || "U"}</div>
+                        )}
+                      </div>
+                    ))}
+
+                    {aiThinking && (
+                      <div className="chat-bubble-row chat-bubble-row-ai">
                         <div className="chat-avatar chat-avatar-ai">🤖</div>
-                      )}
-                      <div className={`chat-bubble ${msg.role === "user" ? "chat-bubble-user" : "chat-bubble-ai"}`}>
-                        <p className="chat-bubble-text">{msg.text}</p>
-                        <span className="chat-bubble-time">
-                          {new Date(msg.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                        </span>
+                        <div className="chat-bubble chat-bubble-ai chat-typing">
+                          <span className="typing-dot"></span>
+                          <span className="typing-dot"></span>
+                          <span className="typing-dot"></span>
+                        </div>
                       </div>
-                      {msg.role === "user" && (
-                        <div className="chat-avatar chat-avatar-user">{user?.name?.[0]?.toUpperCase() || "U"}</div>
-                      )}
-                    </div>
-                  ))}
+                    )}
 
-                  {aiThinking && (
-                    <div className="chat-bubble-row chat-bubble-row-ai">
-                      <div className="chat-avatar chat-avatar-ai">🤖</div>
-                      <div className="chat-bubble chat-bubble-ai chat-typing">
-                        <span className="typing-dot"></span>
-                        <span className="typing-dot"></span>
-                        <span className="typing-dot"></span>
-                      </div>
-                    </div>
-                  )}
+                    <div ref={chatEndRef} />
+                  </div>
 
-                  <div ref={chatEndRef} />
-                </div>
-
-                {/* Chat Input */}
-                <div className="chatbot-input-bar">
-                  <textarea
-                    className="chatbot-input"
-                    placeholder="Ask anything about the course material..."
-                    value={question}
-                    onChange={(e) => setQuestion(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        askDoubt();
-                      }
-                    }}
-                    rows={1}
-                    disabled={aiThinking}
-                  />
-                  <button
-                    className="chatbot-send-btn"
-                    onClick={() => askDoubt()}
-                    disabled={aiThinking || !question.trim()}
-                    title="Send message"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="22" y1="2" x2="11" y2="13" />
-                      <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                    </svg>
-                  </button>
+                  {/* Chat Input */}
+                  <div className="chatbot-input-bar">
+                    <textarea
+                      className="chatbot-input"
+                      placeholder="Ask anything about the course material..."
+                      value={question}
+                      onChange={(e) => setQuestion(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          askDoubt();
+                        }
+                      }}
+                      rows={1}
+                      disabled={aiThinking}
+                    />
+                    <button
+                      className="chatbot-send-btn"
+                      onClick={() => askDoubt()}
+                      disabled={aiThinking || !question.trim()}
+                      title="Send message"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="22" y1="2" x2="11" y2="13" />
+                        <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -669,23 +910,84 @@ export default function StudentDashboard() {
                   </div>
                 ) : (
                   <div className="form-grid">
-                    {announcements.map((a) => (
-                      <div key={a._id} className="announcement-item">
-                        <div className="announcement-title">{a.title}</div>
-                        <div className="announcement-body">{a.message}</div>
-                        {a.createdAt && (
-                          <div className="announcement-date">
-                            {new Date(a.createdAt).toLocaleDateString(undefined, {
-                              day: "numeric",
-                              month: "long",
-                              year: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
+                    {announcements.map((a) => {
+                      const isTask = a.type === "assignment" || a.type === "project";
+                      return (
+                        <div 
+                          key={a._id} 
+                          className={`announcement-item ${isTask ? 'premium-banner' : ''}`}
+                          style={isTask ? { border: "1px solid var(--primary-light)", background: "linear-gradient(145deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.05))", cursor: "pointer", transition: "transform 0.2s" } : {}}
+                          onClick={() => {
+                            if (isTask) {
+                              setActiveTab("assignments");
+                              if (a.referenceId) setSelectedAssignmentId(a.referenceId);
+                            }
+                          }}
+                        >
+                          <div className="announcement-title" style={isTask ? { color: "var(--primary-light)" } : {}}>
+                            {isTask && "🔥 "}{a.title}
                           </div>
-                        )}
-                      </div>
-                    ))}
+                          <div className="announcement-body">{a.message}</div>
+                          {a.createdAt && (
+                            <div className="announcement-date text-secondary mt-3">
+                              {new Date(a.createdAt).toLocaleDateString(undefined, {
+                                day: "numeric",
+                                month: "long",
+                                year: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </div>
+                          )}
+                          {isTask && (
+                             <div style={{ marginTop: "16px" }}>
+                               <button className="btn-primary btn-sm" style={{ background: "var(--primary)" }}>Go to {a.type === 'project' ? 'Project' : 'Assignment'} →</button>
+                             </div>
+                          )}
+
+                          {/* ── Comments Section ── */}
+                          <div style={{ marginTop: "16px", borderTop: "1px solid var(--border)", paddingTop: "12px" }}>
+                            <button 
+                              className="btn-ghost btn-sm" 
+                              style={{ padding: "4px 0", fontSize: "13px" }}
+                              onClick={(e) => { e.stopPropagation(); toggleComments(a._id); }}
+                            >
+                              💬 {openCommentsId === a._id ? "Hide Comments" : "Comments"}
+                            </button>
+
+                            {openCommentsId === a._id && (
+                              <div style={{ marginTop: "12px" }} onClick={(e) => e.stopPropagation()}>
+                                {comments.length === 0 ? (
+                                  <p className="text-secondary text-sm" style={{ marginBottom: "8px" }}>No comments yet. Be the first!</p>
+                                ) : (
+                                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "12px", maxHeight: "200px", overflowY: "auto" }}>
+                                    {comments.map((c) => (
+                                      <div key={c._id} style={{ background: "var(--surface-hover)", padding: "8px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                                          <span style={{ fontWeight: 600, fontSize: "12px", color: "var(--text-primary)" }}>{c.userId?.name || "User"}</span>
+                                          <span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>{new Date(c.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                                        </div>
+                                        <p style={{ margin: 0, fontSize: "13px", color: "var(--text-secondary)" }}>{c.text}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                <div style={{ display: "flex", gap: "8px" }}>
+                                  <input 
+                                    placeholder="Write a comment..." 
+                                    value={newComment} 
+                                    onChange={(e) => setNewComment(e.target.value)} 
+                                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); postComment(a._id); } }}
+                                    style={{ flex: 1, padding: "8px 12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "13px" }} 
+                                  />
+                                  <button className="btn-primary btn-sm" onClick={() => postComment(a._id)}>Post</button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -744,6 +1046,20 @@ export default function StudentDashboard() {
                     </table>
                   </div>
                 )}
+
+                <div className="item-card mt-6">
+                  <div className="item-card-header">
+                    <span className="item-card-title">💡 How is this calculated?</span>
+                  </div>
+                  <p className="item-card-desc" style={{ marginTop: "var(--space-2)", lineHeight: "1.6" }}>
+                    The AI leaderboard score combines your academic performance and classroom engagement:<br/>
+                    • <strong>Assignments (50%)</strong>: Total marks vs. Max possible marks.<br/>
+                    • <strong>Projects (30%)</strong>: Practical project evaluations.<br/>
+                    • <strong>Doubt & Engagement (20%)</strong>: Based on the quantity and AI-evaluated quality of questions you ask via Ask AI.<br/>
+                    <br/>
+                    <em>Formula breakdown: (0.5 * Assignment Score) + (0.3 * Project Score) + (0.2 * Doubt Score)</em>
+                  </p>
+                </div>
               </div>
             )}
           </div>

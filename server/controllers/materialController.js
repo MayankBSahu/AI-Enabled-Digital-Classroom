@@ -95,6 +95,46 @@ const listMaterialsByCourse = async (req, res) => {
   return res.json({ materials });
 };
 
+const updateMaterial = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, description, type } = req.body;
+    const material = await Material.findById(id);
+    if (!material) return res.status(404).json({ message: "Material not found" });
+
+    if (title !== undefined) material.title = title;
+    if (description !== undefined) material.description = description;
+    if (type !== undefined) material.type = type;
+    await material.save();
+    return res.json({ material });
+  } catch (error) {
+    console.error("Update material error:", error.message);
+    return res.status(500).json({ message: "Failed to update material" });
+  }
+};
+
+const deleteMaterial = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const material = await Material.findByIdAndDelete(id);
+    if (!material) return res.status(404).json({ message: "Material not found" });
+
+    // Try to delete the physical file
+    if (material.fileUrl) {
+      const filename = material.fileUrl.replace(/^\/uploads\//, "");
+      const uploadDir = path.resolve(process.cwd(), env.localUploadDir);
+      const filePath = path.join(uploadDir, filename);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+    return res.json({ message: "Material deleted" });
+  } catch (error) {
+    console.error("Delete material error:", error.message);
+    return res.status(500).json({ message: "Failed to delete material" });
+  }
+};
+
 /**
  * Re-index ALL materials for a course.
  * Extracts PDF text from existing files and re-indexes everything with proper headers.
@@ -158,5 +198,7 @@ const reindexCourseMaterials = async (req, res) => {
 module.exports = {
   uploadMaterial,
   listMaterialsByCourse,
-  reindexCourseMaterials
+  reindexCourseMaterials,
+  updateMaterial,
+  deleteMaterial
 };

@@ -1,5 +1,7 @@
 const Assignment = require("../models/Assignment");
 const Submission = require("../models/Submission");
+const fs = require("fs");
+const pdfParse = require("pdf-parse");
 const { resolveFileUrl } = require("../utils/storage");
 const { evaluateAssignment } = require("../utils/aiClient");
 
@@ -17,6 +19,17 @@ const uploadSubmission = async (req, res) => {
   }
 
   const fileUrl = resolveFileUrl(req.file.filename);
+
+  let finalSubmissionText = submissionText;
+  if (!finalSubmissionText && req.file && req.file.mimetype === "application/pdf") {
+    try {
+      const dataBuffer = fs.readFileSync(req.file.path);
+      const data = await pdfParse(dataBuffer);
+      finalSubmissionText = data.text;
+    } catch (e) {
+      console.error("Failed to parse PDF document:", e);
+    }
+  }
 
   const submission = await Submission.findOneAndUpdate(
     { assignmentId, studentId: req.user._id },
@@ -40,7 +53,8 @@ const uploadSubmission = async (req, res) => {
     const aiResult = await evaluateAssignment({
       submission_id: submission._id.toString(),
       file_url: fileUrl,
-      submission_text: submissionText,
+      submission_text: finalSubmissionText,
+      description: assignment.description || "",
       rubric: assignment.rubric,
       max_marks: assignment.maxMarks,
       model_answer: ""
@@ -86,7 +100,7 @@ const getMySubmissions = async (req, res) => {
       assignmentId: { $in: assignmentIds },
       studentId: req.user._id
     })
-      .populate("assignmentId", "title maxMarks dueDate")
+      .populate("assignmentId", "title maxMarks dueDate isProject")
       .sort({ createdAt: -1 })
       .lean();
     return res.json({ submissions });
@@ -96,8 +110,37 @@ const getMySubmissions = async (req, res) => {
   }
 };
 
+const updateSubmissionScore = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { marks } = req.body;
+    
+    if (marks === undefined || marks === null) {
+      return res.status(400).json({ message: "Marks are required" });
+    }
+
+    const submission = await Submission.findById(id);
+    if (!submission) {
+      return res.status(404).json({ message: "Submission not found" });
+    }
+
+    if (!submission.aiResult) {
+      submission.aiResult = { feedback: "", mistakes: [], suggestions: [] };
+    }
+    
+    submission.aiResult.marks = Number(marks);
+    await submission.save();
+
+    return res.json({ submission });
+  } catch (error) {
+    console.error("Update score error:", error.message);
+    return res.status(500).json({ message: "Failed to update score" });
+  }
+};
+
 module.exports = {
   uploadSubmission,
   listSubmissionsByAssignment,
-  getMySubmissions
+  getMySubmissions,
+  updateSubmissionScore
 };

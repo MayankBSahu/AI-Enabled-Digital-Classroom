@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/Toast";
 import Sidebar from "../components/Sidebar";
@@ -38,6 +38,7 @@ export default function ProfessorDashboard() {
   const [assignmentRubric, setAssignmentRubric] = useState("Correctness,Clarity,Examples");
   const [maxMarks, setMaxMarks] = useState(100);
   const [dueDate, setDueDate] = useState("");
+  const [isProject, setIsProject] = useState(false);
   const [assignments, setAssignments] = useState([]);
   const [selectedViewAssignment, setSelectedViewAssignment] = useState(null);
   const [assignmentSubmissions, setAssignmentSubmissions] = useState([]);
@@ -57,6 +58,38 @@ export default function ProfessorDashboard() {
   const [newCourseId, setNewCourseId] = useState("");
   const [newCourseName, setNewCourseName] = useState("");
   const [newCourseDesc, setNewCourseDesc] = useState("");
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [editingScoreId, setEditingScoreId] = useState(null);
+  const [editingScoreValue, setEditingScoreValue] = useState("");
+
+  /* ── Announcement Editing State ── */
+  const [editingAnnouncementId, setEditingAnnouncementId] = useState(null);
+  const [editAnnTitle, setEditAnnTitle] = useState("");
+  const [editAnnMessage, setEditAnnMessage] = useState("");
+
+  /* ── Announcement Comments State ── */
+  const [openCommentsId, setOpenCommentsId] = useState(null);
+  const [comments, setComments] = useState([]);
+  const [newComment, setNewComment] = useState("");
+
+  /* ── Assignment Editing State ── */
+  const [editingAssignmentId, setEditingAssignmentId] = useState(null);
+  const [editAsgnTitle, setEditAsgnTitle] = useState("");
+  const [editAsgnDesc, setEditAsgnDesc] = useState("");
+
+  /* ── Material Editing State ── */
+  const [editingMaterialId, setEditingMaterialId] = useState(null);
+  const [editMatTitle, setEditMatTitle] = useState("");
+  const [editMatDesc, setEditMatDesc] = useState("");
+
+  const [question, setQuestion] = useState("");
+  const [chatMessages, setChatMessages] = useState([]);
+  const [allDoubts, setAllDoubts] = useState([]);
+  const [selectedConversationId, setSelectedConversationId] = useState(null);
+  const [historySidebarOpen, setHistorySidebarOpen] = useState(true);
+  const [aiThinking, setAiThinking] = useState(false);
+  const chatEndRef = useRef(null);
+  const chatContainerRef = useRef(null);
 
   const loadMyCourses = async () => {
     try {
@@ -78,6 +111,8 @@ export default function ProfessorDashboard() {
     else if (activeTab === "announcements") loadAnnouncements();
     else if (activeTab === "analytics") loadAnalytics();
     else if (activeTab === "assignments") loadAssignments();
+    else if (activeTab === "leaderboard") loadLeaderboard();
+    else if (activeTab === "doubts") loadChatHistory();
   }, [activeTab, courseId]);
 
   const loadAnnouncements = async () => {
@@ -162,6 +197,17 @@ export default function ProfessorDashboard() {
     }
   };
 
+  const updateSubmissionScore = async (submissionId, assignmentId) => {
+    try {
+      await api.put(`/submissions/${submissionId}/score`, { marks: Number(editingScoreValue) });
+      addToast("Score updated successfully", "success");
+      setEditingScoreId(null);
+      await loadSubmissions(assignmentId);
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to update score", "error");
+    }
+  };
+
   const uploadMaterial = async (e) => {
     e.preventDefault();
     setSubmitting(true);
@@ -198,16 +244,63 @@ export default function ProfessorDashboard() {
         rubric: assignmentRubric.split(",").map((x) => x.trim()).filter(Boolean),
         maxMarks: Number(maxMarks),
         dueDate,
+        isProject,
       });
       addToast("Assignment created successfully!", "success");
       setAssignmentTitle("");
       setAssignmentDescription("");
       setDueDate("");
+      setIsProject(false);
       await loadAssignments();
     } catch (error) {
       addToast(error.response?.data?.message || "Failed to create assignment", "error");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const deleteAssignment = async (id) => {
+    if (!window.confirm("Delete this assignment and all its submissions?")) return;
+    try {
+      await api.delete(`/assignments/${id}`);
+      addToast("Assignment deleted", "success");
+      setSelectedViewAssignment(null);
+      await loadAssignments();
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to delete assignment", "error");
+    }
+  };
+
+  const saveEditAssignment = async (id) => {
+    try {
+      await api.put(`/assignments/${id}`, { title: editAsgnTitle, description: editAsgnDesc });
+      addToast("Assignment updated", "success");
+      setEditingAssignmentId(null);
+      await loadAssignments();
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to update assignment", "error");
+    }
+  };
+
+  const deleteMaterial = async (id) => {
+    if (!window.confirm("Delete this material permanently?")) return;
+    try {
+      await api.delete(`/materials/${id}`);
+      addToast("Material deleted", "success");
+      await loadMaterials();
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to delete material", "error");
+    }
+  };
+
+  const saveEditMaterial = async (id) => {
+    try {
+      await api.put(`/materials/${id}`, { title: editMatTitle, description: editMatDesc });
+      addToast("Material updated", "success");
+      setEditingMaterialId(null);
+      await loadMaterials();
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to update material", "error");
     }
   };
 
@@ -230,12 +323,70 @@ export default function ProfessorDashboard() {
     }
   };
 
+  const deleteAnnouncement = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this announcement?")) return;
+    try {
+      await api.delete(`/announcements/${id}`);
+      addToast("Announcement deleted", "success");
+      await loadAnnouncements();
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to delete announcement", "error");
+    }
+  };
+
+  const saveEditAnnouncement = async (id) => {
+    try {
+      await api.put(`/announcements/${id}`, { title: editAnnTitle, message: editAnnMessage });
+      addToast("Announcement updated", "success");
+      setEditingAnnouncementId(null);
+      await loadAnnouncements();
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to update announcement", "error");
+    }
+  };
+
+  const toggleComments = async (announcementId) => {
+    if (openCommentsId === announcementId) {
+      setOpenCommentsId(null);
+      return;
+    }
+    setOpenCommentsId(announcementId);
+    try {
+      const { data } = await api.get(`/announcements/${announcementId}/comments`);
+      setComments(data.comments || []);
+    } catch (error) {
+      setComments([]);
+    }
+  };
+
+  const postComment = async (announcementId) => {
+    if (!newComment.trim()) return;
+    try {
+      await api.post(`/announcements/${announcementId}/comments`, { text: newComment });
+      setNewComment("");
+      const { data } = await api.get(`/announcements/${announcementId}/comments`);
+      setComments(data.comments || []);
+    } catch (error) {
+      addToast("Failed to post comment", "error");
+    }
+  };
+
   const recomputeLeaderboard = async () => {
     try {
       await api.post(`/leaderboard/${courseId}/recompute`);
       addToast("Leaderboard recomputed", "success");
+      await loadLeaderboard();
     } catch (error) {
       addToast(error.response?.data?.message || "Recompute failed", "error");
+    }
+  };
+
+  const loadLeaderboard = async () => {
+    try {
+      const { data } = await api.get(`/leaderboard/${courseId}`);
+      setLeaderboard(data.leaderboard || []);
+    } catch (error) {
+      addToast(error.response?.data?.message || "Failed to load leaderboard", "error");
     }
   };
 
@@ -245,6 +396,126 @@ export default function ProfessorDashboard() {
       setAnalytics(data);
     } catch (error) {
       addToast(error.response?.data?.message || "Failed to load analytics", "error");
+    }
+  };
+
+  const getDateGroup = (dateStr) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+    const weekAgo = new Date(today); weekAgo.setDate(today.getDate() - 7);
+    const monthAgo = new Date(today); monthAgo.setDate(today.getDate() - 30);
+
+    if (date >= today) return "Today";
+    if (date >= yesterday) return "Yesterday";
+    if (date >= weekAgo) return "Previous 7 Days";
+    if (date >= monthAgo) return "Previous 30 Days";
+    return "Older";
+  };
+
+  const groupedHistory = useMemo(() => {
+    const threadsMap = {};
+    for (const doubt of allDoubts) {
+      const tId = doubt.sessionId || doubt._id;
+      if (!threadsMap[tId]) {
+        threadsMap[tId] = {
+           id: tId,
+           title: doubt.question, 
+           doubts: [],
+           createdAt: doubt.createdAt
+        };
+      }
+      threadsMap[tId].doubts.push(doubt);
+    }
+    
+    const threads = Object.values(threadsMap).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const groups = {};
+    const groupOrder = ["Today", "Yesterday", "Previous 7 Days", "Previous 30 Days", "Older"];
+
+    for (const thread of threads) {
+      const group = getDateGroup(thread.createdAt);
+      if (!groups[group]) groups[group] = [];
+      groups[group].push(thread);
+    }
+
+    return groupOrder
+      .filter(g => groups[g]?.length)
+      .map(g => ({ label: g, threads: groups[g] }));
+  }, [allDoubts]);
+
+  const loadChatHistory = async () => {
+    try {
+      const { data } = await api.get(`/doubts/course/${courseId}`);
+      setAllDoubts(data.doubts || []);
+      setChatMessages([]);
+      setSelectedConversationId(null);
+    } catch (error) {
+      console.error("Failed to load chat history");
+    }
+  };
+
+  const selectConversation = (thread) => {
+    setSelectedConversationId(thread.id);
+    const msgs = [];
+    for (const doubt of thread.doubts) {
+      msgs.push({ role: "user", text: doubt.question, time: doubt.createdAt });
+      msgs.push({ role: "ai", text: doubt.answer, time: doubt.createdAt });
+    }
+    setChatMessages(msgs);
+    setTimeout(() => chatContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" }), 50);
+  };
+
+  const startNewChat = () => {
+    setSelectedConversationId(`session_${Date.now()}`); 
+    setChatMessages([]);
+    setQuestion("");
+  };
+
+  const clearChatHistory = async () => {
+    try {
+      await api.delete(`/doubts/course/${courseId}`);
+      setChatMessages([]);
+      setAllDoubts([]);
+      setSelectedConversationId(null);
+      addToast("Chat history cleared", "success");
+    } catch (error) {
+      addToast("Failed to clear history", "error");
+    }
+  };
+
+  const askDoubt = async (e) => {
+    if (e) e.preventDefault();
+    if (!question.trim()) return;
+    const userMsg = question.trim();
+    setQuestion("");
+
+    let sessionId = selectedConversationId;
+    if (!sessionId || sessionId === "pending") {
+      sessionId = `session_${Date.now()}`;
+      setSelectedConversationId(sessionId);
+    }
+
+    setChatMessages((prev) => [...prev, { role: "user", text: userMsg, time: new Date().toISOString() }]);
+    setAiThinking(true);
+    setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+    try {
+      const { data } = await api.post("/doubts/ask", { courseId, question: userMsg, sessionId });
+      const doubt = data.doubt;
+      const answer = doubt?.answer || "No answer generated.";
+      
+      setChatMessages((prev) => [...prev, { role: "ai", text: answer, time: doubt?.createdAt || new Date().toISOString() }]);
+      
+      if (doubt) {
+        setAllDoubts((prev) => [...prev, doubt]);
+        setSelectedConversationId(doubt.sessionId || doubt._id);
+      }
+    } catch (error) {
+      setChatMessages((prev) => [...prev, { role: "ai", text: "Sorry, I encountered an error. Please try again.", time: new Date().toISOString() }]);
+      addToast(error.response?.data?.message || "Failed to get answer", "error");
+    } finally {
+      setAiThinking(false);
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
     }
   };
 
@@ -481,8 +752,6 @@ export default function ProfessorDashboard() {
                         <select id="mat-type" value={materialType} onChange={(e) => setMaterialType(e.target.value)}>
                           <option value="slide">Slide</option>
                           <option value="note">Note</option>
-                          <option value="assignment">Assignment</option>
-                          <option value="project-topic">Project Topic</option>
                         </select>
                       </div>
                       <div className="form-group">
@@ -527,21 +796,40 @@ export default function ProfessorDashboard() {
                     <div className="form-grid">
                       {materials.map((m) => (
                         <div key={m._id} className="item-card">
-                          <div className="item-card-header">
-                            <span className="item-card-title">{m.title}</span>
-                            <span className="badge badge-primary">{m.type}</span>
-                          </div>
-                          <p className="item-card-desc">{m.description || "No description"}</p>
-                          <div className="item-card-meta">
-                            {m.vectorized ? `✅ Indexed (${m.indexedChunks || 0} chunks)` : "⏳ Not indexed"} •{" "}
-                            {new Date(m.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}
-                          </div>
-                          {m.fileUrl && (
-                            <div className="item-card-actions">
-                              <a href={toPublicFileUrl(m.fileUrl)} target="_blank" rel="noreferrer" className="link-btn">
-                                📎 Open File
-                              </a>
+                          {editingMaterialId === m._id ? (
+                            <div>
+                              <div className="form-group" style={{ marginBottom: "var(--space-3)" }}>
+                                <input value={editMatTitle} onChange={(e) => setEditMatTitle(e.target.value)} style={{ width: "100%" }} placeholder="Title" />
+                              </div>
+                              <div className="form-group" style={{ marginBottom: "var(--space-3)" }}>
+                                <textarea rows={2} value={editMatDesc} onChange={(e) => setEditMatDesc(e.target.value)} style={{ width: "100%" }} placeholder="Description" />
+                              </div>
+                              <div style={{ display: "flex", gap: "8px" }}>
+                                <button className="btn-primary btn-sm" onClick={() => saveEditMaterial(m._id)}>Save</button>
+                                <button className="btn-ghost btn-sm" onClick={() => setEditingMaterialId(null)}>Cancel</button>
+                              </div>
                             </div>
+                          ) : (
+                            <>
+                              <div className="item-card-header">
+                                <span className="item-card-title">{m.title}</span>
+                                <span className="badge badge-primary">{m.type}</span>
+                              </div>
+                              <p className="item-card-desc">{m.description || "No description"}</p>
+                              <div className="item-card-meta">
+                                {m.vectorized ? `✅ Indexed (${m.indexedChunks || 0} chunks)` : "⏳ Not indexed"} •{" "}
+                                {new Date(m.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}
+                              </div>
+                              <div style={{ display: "flex", gap: "8px", marginTop: "var(--space-3)", alignItems: "center" }}>
+                                {m.fileUrl && (
+                                  <a href={toPublicFileUrl(m.fileUrl)} target="_blank" rel="noreferrer" className="link-btn" style={{ fontSize: "var(--font-sm)" }}>
+                                    📎 Open File
+                                  </a>
+                                )}
+                                <button className="btn-secondary btn-sm" onClick={() => { setEditingMaterialId(m._id); setEditMatTitle(m.title); setEditMatDesc(m.description || ""); }}>✎ Edit</button>
+                                <button className="btn-ghost btn-sm" style={{ color: "var(--error, #ef4444)" }} onClick={() => deleteMaterial(m._id)}>🗑 Delete</button>
+                              </div>
+                            </>
                           )}
                         </div>
                       ))}
@@ -602,6 +890,55 @@ export default function ProfessorDashboard() {
                       </div>
                     </div>
 
+                    <div className="form-group" style={{ marginTop: 'var(--space-2)' }}>
+                      <label style={{ marginBottom: "8px", display: "block" }}>Task Type Classification</label>
+                      <div style={{ display: 'flex', gap: '8px', background: 'var(--surface-hover)', padding: '6px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+                        <button 
+                          type="button"
+                          onClick={() => setIsProject(false)}
+                          style={{ 
+                            flex: 1, 
+                            padding: '10px 16px', 
+                            borderRadius: 'var(--radius-sm)',
+                            border: 'none',
+                            background: !isProject ? 'var(--primary)' : 'transparent',
+                            color: !isProject ? '#fff' : 'var(--text-secondary)',
+                            fontWeight: !isProject ? 600 : 500,
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px'
+                          }}
+                        >
+                          📝 Standard Assignment
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => setIsProject(true)}
+                          style={{ 
+                            flex: 1, 
+                            padding: '10px 16px', 
+                            borderRadius: 'var(--radius-sm)',
+                            border: 'none',
+                            background: isProject ? 'var(--accent)' : 'transparent',
+                            color: isProject ? '#000' : 'var(--text-secondary)',
+                            fontWeight: isProject ? 700 : 500,
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            boxShadow: isProject ? '0 0 16px rgba(139, 92, 246, 0.4)' : 'none'
+                          }}
+                        >
+                          🚀 Project (30% Leaderboard Weight)
+                        </button>
+                      </div>
+                    </div>
+
                     <div className="form-actions">
                       <button type="submit" className="btn-primary btn-full" disabled={submitting}>
                         {submitting ? <><span className="spinner"></span> Creating...</> : "Create Assignment"}
@@ -632,20 +969,42 @@ export default function ProfessorDashboard() {
                     <div className="form-grid">
                       {assignments.map((a) => (
                         <div key={a._id} className="item-card">
-                          <div className="item-card-header">
-                            <span className="item-card-title">{a.title}</span>
-                            <span className="badge badge-primary">{a.maxMarks} marks</span>
-                          </div>
-                          {a.description && <p className="item-card-desc">{a.description}</p>}
-                          <div className="item-card-meta">
-                            Due: {new Date(a.dueDate).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
-                            {a.rubric?.length > 0 && ` • Rubric: ${a.rubric.join(", ")}`}
-                          </div>
-                          <div className="item-card-actions" style={{ marginTop: "var(--space-3)" }}>
-                            <button className="btn-secondary btn-sm" onClick={() => { setSelectedViewAssignment(selectedViewAssignment?._id === a._id ? null : a); loadSubmissions(a._id); }}>
-                              {selectedViewAssignment?._id === a._id ? "▲ Hide Submissions" : "▼ View Submissions"}
-                            </button>
-                          </div>
+                          {editingAssignmentId === a._id ? (
+                            <div>
+                              <div className="form-group" style={{ marginBottom: "var(--space-3)" }}>
+                                <input value={editAsgnTitle} onChange={(e) => setEditAsgnTitle(e.target.value)} style={{ width: "100%" }} placeholder="Title" />
+                              </div>
+                              <div className="form-group" style={{ marginBottom: "var(--space-3)" }}>
+                                <textarea rows={2} value={editAsgnDesc} onChange={(e) => setEditAsgnDesc(e.target.value)} style={{ width: "100%" }} placeholder="Description" />
+                              </div>
+                              <div style={{ display: "flex", gap: "8px" }}>
+                                <button className="btn-primary btn-sm" onClick={() => saveEditAssignment(a._id)}>Save</button>
+                                <button className="btn-ghost btn-sm" onClick={() => setEditingAssignmentId(null)}>Cancel</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="item-card-header">
+                                <span className="item-card-title">{a.title}</span>
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                  {a.isProject && <span className="badge badge-accent">Project</span>}
+                                  <span className="badge badge-primary">{a.maxMarks} marks</span>
+                                </div>
+                              </div>
+                              {a.description && <p className="item-card-desc">{a.description}</p>}
+                              <div className="item-card-meta">
+                                Due: {new Date(a.dueDate).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                {a.rubric?.length > 0 && ` • Rubric: ${a.rubric.join(", ")}`}
+                              </div>
+                              <div className="item-card-actions" style={{ marginTop: "var(--space-3)", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                                <button className="btn-secondary btn-sm" onClick={() => { setSelectedViewAssignment(selectedViewAssignment?._id === a._id ? null : a); loadSubmissions(a._id); }}>
+                                  {selectedViewAssignment?._id === a._id ? "▲ Hide Submissions" : "▼ View Submissions"}
+                                </button>
+                                <button className="btn-secondary btn-sm" onClick={() => { setEditingAssignmentId(a._id); setEditAsgnTitle(a.title); setEditAsgnDesc(a.description || ""); }}>✎ Edit</button>
+                                <button className="btn-ghost btn-sm" style={{ color: "var(--error, #ef4444)" }} onClick={() => deleteAssignment(a._id)}>🗑 Delete</button>
+                              </div>
+                            </>
+                          )}
 
                           {selectedViewAssignment?._id === a._id && (
                             <div style={{ marginTop: "var(--space-4)", borderTop: "1px solid var(--border)", paddingTop: "var(--space-4)" }}>
@@ -666,8 +1025,33 @@ export default function ProfessorDashboard() {
                                       </div>
                                       {s.aiResult && s.status === "evaluated" && (
                                         <div style={{ marginTop: "var(--space-2)" }}>
-                                          <span style={{ fontWeight: 700, color: "var(--accent)" }}>{s.aiResult.marks ?? "—"}</span>
-                                          <span className="text-secondary text-sm"> / {a.maxMarks} marks</span>
+                                          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+                                            {editingScoreId === s._id ? (
+                                              <>
+                                                <input 
+                                                  type="number" 
+                                                  style={{ width: "80px", padding: "4px 8px", background: "var(--surface)", border: "1px solid var(--border)", color: "var(--text-primary)", borderRadius: "var(--radius-sm)" }}
+                                                  value={editingScoreValue} 
+                                                  onChange={(e) => setEditingScoreValue(e.target.value)} 
+                                                />
+                                                <span className="text-secondary text-sm"> / {a.maxMarks} marks</span>
+                                                <button className="btn-primary btn-sm" onClick={() => updateSubmissionScore(s._id, a._id)}>Save</button>
+                                                <button className="btn-ghost btn-sm" onClick={() => setEditingScoreId(null)}>Cancel</button>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <span style={{ fontWeight: 700, color: "var(--accent)" }}>{s.aiResult.marks ?? "—"}</span>
+                                                <span className="text-secondary text-sm"> / {a.maxMarks} marks</span>
+                                                <button 
+                                                  className="btn-ghost btn-sm" 
+                                                  style={{ padding: "2px 8px", fontSize: "12px", marginLeft: "10px" }}
+                                                  onClick={() => { setEditingScoreId(s._id); setEditingScoreValue(s.aiResult.marks ?? 0); }}
+                                                >
+                                                  ✎ Edit
+                                                </button>
+                                              </>
+                                            )}
+                                          </div>
                                           {s.aiResult.feedback && (
                                             <p className="text-sm text-secondary" style={{ marginTop: "var(--space-1)" }}>{s.aiResult.feedback}</p>
                                           )}
@@ -750,19 +1134,84 @@ export default function ProfessorDashboard() {
                     <div className="form-grid">
                       {announcements.map((a) => (
                         <div key={a._id} className="announcement-item">
-                          <div className="announcement-title">{a.title}</div>
-                          <div className="announcement-body">{a.message}</div>
-                          {a.createdAt && (
-                            <div className="announcement-date">
-                              {new Date(a.createdAt).toLocaleDateString(undefined, {
-                                day: "numeric",
-                                month: "long",
-                                year: "numeric",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
+                          {editingAnnouncementId === a._id ? (
+                            <div>
+                              <div className="form-group" style={{ marginBottom: "var(--space-3)" }}>
+                                <input value={editAnnTitle} onChange={(e) => setEditAnnTitle(e.target.value)} style={{ width: "100%" }} />
+                              </div>
+                              <div className="form-group" style={{ marginBottom: "var(--space-3)" }}>
+                                <textarea rows={3} value={editAnnMessage} onChange={(e) => setEditAnnMessage(e.target.value)} style={{ width: "100%" }} />
+                              </div>
+                              <div style={{ display: "flex", gap: "8px" }}>
+                                <button className="btn-primary btn-sm" onClick={() => saveEditAnnouncement(a._id)}>Save</button>
+                                <button className="btn-ghost btn-sm" onClick={() => setEditingAnnouncementId(null)}>Cancel</button>
+                              </div>
                             </div>
+                          ) : (
+                            <>
+                              <div className="announcement-title">{a.title}</div>
+                              <div className="announcement-body">{a.message}</div>
+                              {a.createdAt && (
+                                <div className="announcement-date">
+                                  {new Date(a.createdAt).toLocaleDateString(undefined, {
+                                    day: "numeric",
+                                    month: "long",
+                                    year: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                </div>
+                              )}
+                              <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
+                                <button className="btn-secondary btn-sm" onClick={() => { setEditingAnnouncementId(a._id); setEditAnnTitle(a.title); setEditAnnMessage(a.message); }}>✎ Edit</button>
+                                <button className="btn-ghost btn-sm" style={{ color: "var(--error, #ef4444)" }} onClick={() => deleteAnnouncement(a._id)}>🗑 Delete</button>
+                              </div>
+                            </>
                           )}
+
+                          {/* ── Comments Section ── */}
+                          <div style={{ marginTop: "16px", borderTop: "1px solid var(--border)", paddingTop: "12px" }}>
+                            <button 
+                              className="btn-ghost btn-sm" 
+                              style={{ padding: "4px 0", fontSize: "13px" }}
+                              onClick={() => toggleComments(a._id)}
+                            >
+                              💬 {openCommentsId === a._id ? "Hide Comments" : "View Comments"}
+                            </button>
+
+                            {openCommentsId === a._id && (
+                              <div style={{ marginTop: "12px" }}>
+                                {comments.length === 0 ? (
+                                  <p className="text-secondary text-sm" style={{ marginBottom: "8px" }}>No student comments yet.</p>
+                                ) : (
+                                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "12px", maxHeight: "240px", overflowY: "auto" }}>
+                                    {comments.map((c) => (
+                                      <div key={c._id} style={{ background: "var(--surface-hover)", padding: "8px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                            <span style={{ fontWeight: 600, fontSize: "12px", color: "var(--text-primary)" }}>{c.userId?.name || "User"}</span>
+                                            {c.userId?.role && <span className="badge badge-primary" style={{ fontSize: "10px", padding: "1px 6px" }}>{c.userId.role}</span>}
+                                          </div>
+                                          <span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>{new Date(c.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                                        </div>
+                                        <p style={{ margin: 0, fontSize: "13px", color: "var(--text-secondary)" }}>{c.text}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                <div style={{ display: "flex", gap: "8px" }}>
+                                  <input 
+                                    placeholder="Reply to students..." 
+                                    value={newComment} 
+                                    onChange={(e) => setNewComment(e.target.value)} 
+                                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); postComment(a._id); } }}
+                                    style={{ flex: 1, padding: "8px 12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", color: "var(--text-primary)", fontSize: "13px" }} 
+                                  />
+                                  <button className="btn-primary btn-sm" onClick={() => postComment(a._id)}>Reply</button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -843,6 +1292,234 @@ export default function ProfessorDashboard() {
                     )}
                   </>
                 )}
+              </div>
+            )}
+
+            {/* ── Ask AI Tab ── */}
+            {activeTab === "doubts" && (
+              <div className="chat-layout">
+                {/* History Sidebar */}
+                <div className={`chat-history-sidebar ${historySidebarOpen ? "open" : "collapsed"}`}>
+                  <div className="chat-history-top">
+                    <button className="chat-new-btn" onClick={startNewChat}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 16, height: 16 }}>
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                      </svg>
+                      New Chat
+                    </button>
+                    <button className="chat-sidebar-toggle" onClick={() => setHistorySidebarOpen(false)} title="Collapse sidebar">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 18, height: 18 }}>
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        <line x1="9" y1="3" x2="9" y2="21" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  <div className="chat-history-list">
+                    {groupedHistory.length === 0 ? (
+                      <div className="chat-history-empty"><p>No conversations yet</p></div>
+                    ) : (
+                      groupedHistory.map((group) => (
+                        <div key={group.label} className="chat-history-group">
+                          <div className="chat-history-group-label">{group.label}</div>
+                          {group.threads.map((thread) => (
+                            <button
+                              key={thread.id}
+                              className={`chat-history-item ${selectedConversationId === thread.id ? "active" : ""}`}
+                              onClick={() => selectConversation(thread)}
+                              title={thread.title}
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="chat-history-item-icon">
+                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                              </svg>
+                              <span className="chat-history-item-text">{thread.title}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="chat-history-bottom">
+                    <button className="chat-clear-btn" onClick={clearChatHistory}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}>
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      </svg>
+                      Clear History
+                    </button>
+                  </div>
+                </div>
+
+                {/* Main Chat Panel */}
+                <div className="chat-main-panel">
+                  <div className="chatbot-header">
+                    <div className="chatbot-header-info">
+                      {!historySidebarOpen && (
+                        <button className="chat-sidebar-expand-btn" onClick={() => setHistorySidebarOpen(true)} title="Open sidebar">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 18, height: 18 }}>
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                            <line x1="9" y1="3" x2="9" y2="21" />
+                          </svg>
+                        </button>
+                      )}
+                      <div className="section-icon cyan" style={{ width: 32, height: 32, fontSize: 16 }}>🤖</div>
+                      <div>
+                        <h3 style={{ fontSize: "var(--font-md)", fontWeight: 700, color: "var(--text-primary)" }}>
+                          AI Teaching Assistant
+                        </h3>
+                        <p style={{ fontSize: "var(--font-xs)", color: "var(--text-tertiary)" }}>
+                          Answers questions about student performance & materials.
+                        </p>
+                      </div>
+                    </div>
+                    {selectedConversationId && (
+                      <button className="btn-ghost btn-sm" onClick={startNewChat} style={{ color: "var(--primary-light)" }}>
+                        + New Chat
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Chat Messages */}
+                  <div className="chatbot-messages" ref={chatContainerRef}>
+                    {chatMessages.length === 0 && !aiThinking && (
+                      <div className="chatbot-empty">
+                        <div style={{ fontSize: 56, marginBottom: 20 }}>🤖</div>
+                        <h3 style={{ color: "var(--text-primary)", marginBottom: 8, fontSize: "var(--font-xl)" }}>Hello, Professor!</h3>
+                        <p style={{ color: "var(--text-tertiary)", fontSize: "var(--font-sm)", maxWidth: 400, lineHeight: 1.6 }}>
+                          I am your AI Teaching Assistant. I can help you with student analytics, summarize materials, or suggest the best way to explain a difficult concept.
+                        </p>
+                        <div className="chat-suggestions">
+                          <button className="chat-suggestion-chip" onClick={() => setQuestion("Based on the uploaded slides, how should I explain this topic?")}>📖 Best way to teach a concept?</button>
+                          <button className="chat-suggestion-chip" onClick={() => setQuestion("Can you create a short pop quiz for my students based on the materials?")}>📝 Generate a short quiz</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {chatMessages.map((msg, i) => (
+                      <div key={i} className={`chat-bubble-row ${msg.role === "user" ? "chat-bubble-row-user" : "chat-bubble-row-ai"}`}>
+                        {msg.role === "ai" && <div className="chat-avatar chat-avatar-ai">🤖</div>}
+                        <div className={`chat-bubble ${msg.role === "user" ? "chat-bubble-user" : "chat-bubble-ai"}`}>
+                          <p className="chat-bubble-text">{msg.text}</p>
+                          <span className="chat-bubble-time">
+                            {new Date(msg.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                        </div>
+                        {msg.role === "user" && <div className="chat-avatar chat-avatar-user">{user?.name?.[0]?.toUpperCase() || "U"}</div>}
+                      </div>
+                    ))}
+
+                    {aiThinking && (
+                      <div className="chat-bubble-row chat-bubble-row-ai">
+                        <div className="chat-avatar chat-avatar-ai">🤖</div>
+                        <div className="chat-bubble chat-bubble-ai chat-typing">
+                          <span className="typing-dot"></span><span className="typing-dot"></span><span className="typing-dot"></span>
+                        </div>
+                      </div>
+                    )}
+                    <div ref={chatEndRef} />
+                  </div>
+
+                  {/* Chat Input */}
+                  <div className="chatbot-input-bar">
+                    <textarea
+                      className="chatbot-input"
+                      placeholder="Ask the assistant anything..."
+                      value={question}
+                      onChange={(e) => setQuestion(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          askDoubt();
+                        }
+                      }}
+                      rows={1}
+                      disabled={aiThinking}
+                    />
+                    <button className="chatbot-send-btn" onClick={() => askDoubt()} disabled={aiThinking || !question.trim()} title="Send message">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="22" y1="2" x2="11" y2="13" />
+                        <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Leaderboard Tab ── */}
+            {activeTab === "leaderboard" && (
+              <div>
+                <div className="flex items-center justify-between mb-6">
+                  <div className="section-header" style={{ marginBottom: 0 }}>
+                    <div className="section-icon amber">🏆</div>
+                    <div>
+                      <h2>Leaderboard</h2>
+                      <p>View student rankings and recompute AI scores</p>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "var(--space-4)" }}>
+                    <button className="btn-secondary btn-sm" onClick={loadLeaderboard}>Refresh</button>
+                    <button className="btn-primary btn-sm" onClick={recomputeLeaderboard} disabled={submitting}>
+                      {submitting ? "Recomputing..." : "🔄 Recompute Leaderboard"}
+                    </button>
+                  </div>
+                </div>
+
+                {leaderboard.length === 0 ? (
+                  <div className="glass-card-static">
+                    <div className="empty-state">
+                      <div className="empty-state-icon">🏆</div>
+                      <p className="empty-state-text">No leaderboard data available yet. Click Recompute to generate.</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="glass-card-static" style={{ padding: 0, overflow: "hidden" }}>
+                    <table className="leaderboard-table">
+                      <thead>
+                        <tr>
+                          <th style={{ paddingLeft: "24px" }}>Rank</th>
+                          <th>Student</th>
+                          <th>Total Score</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {leaderboard.map((row) => (
+                          <tr key={row._id || row.studentId?._id || row.studentId}>
+                            <td style={{ paddingLeft: "24px" }}>
+                              <span className={`rank-badge ${row.rank === 1 ? 'rank-1' : row.rank === 2 ? 'rank-2' : row.rank === 3 ? 'rank-3' : 'rank-default'}`}>
+                                {row.rank}
+                              </span>
+                            </td>
+                            <td style={{ color: "var(--text-primary)", fontWeight: 500 }}>
+                              {row.studentId?.name || row.studentId || "Student"}
+                            </td>
+                            <td>
+                              <span className="badge badge-primary">
+                                {row.totalScore?.toFixed?.(2) ?? row.totalScore}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <div className="item-card mt-6">
+                  <div className="item-card-header">
+                    <span className="item-card-title">💡 How is this calculated?</span>
+                  </div>
+                  <p className="item-card-desc" style={{ marginTop: "var(--space-2)", lineHeight: "1.6" }}>
+                    The AI leaderboard score combines academic performance and classroom engagement:<br/>
+                    • <strong>Assignments (50%)</strong>: Total marks vs. Max possible marks.<br/>
+                    • <strong>Projects (30%)</strong>: Practical project evaluations.<br/>
+                    • <strong>Doubt & Engagement (20%)</strong>: Based on the quantity and AI-evaluated quality of questions asked via Ask AI.<br/>
+                    <br/>
+                    <em>Formula breakdown: (0.5 * Assignment Score) + (0.3 * Project Score) + (0.2 * Doubt Score)</em>
+                  </p>
+                </div>
               </div>
             )}
 

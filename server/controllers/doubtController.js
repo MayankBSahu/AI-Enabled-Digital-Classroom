@@ -3,18 +3,18 @@ const ChatClear = require("../models/ChatClear");
 const { askDoubt, scoreDoubtQuality } = require("../utils/aiClient");
 
 const askCourseDoubt = async (req, res) => {
-  const { courseId, question } = req.body;
+  const { courseId, question, sessionId } = req.body;
 
   if (!courseId || !question) {
     return res.status(400).json({ message: "courseId and question are required" });
   }
 
   try {
-    // Fetch last 5 exchanges for conversation context
-    const recentDoubts = await Doubt.find({
-      courseId,
-      studentId: req.user._id
-    })
+    // Fetch last 5 exchanges for conversation context (scoped to session if threading exists)
+    const filter = { courseId, studentId: req.user._id };
+    if (sessionId) filter.sessionId = sessionId;
+
+    const recentDoubts = await Doubt.find(filter)
       .sort({ createdAt: -1 })
       .limit(5)
       .lean();
@@ -40,6 +40,7 @@ const askCourseDoubt = async (req, res) => {
     const doubt = await Doubt.create({
       courseId,
       studentId: req.user._id,
+      sessionId,
       question,
       answer: ragResponse.answer,
       citations: (ragResponse.citations || []).map((c) => ({
